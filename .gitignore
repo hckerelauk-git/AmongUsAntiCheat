@@ -1,0 +1,17 @@
+# 构建输出
+bin/
+obj/
+build.log
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# 本地备份与探针工具
+*.bak
+tools/CfgProbe/
+
+# 系统
+Thumbs.db
+.DS_Store
