@@ -15,3 +15,7 @@ tools/CfgProbe/
 # 系统
 Thumbs.db
 .DS_Store
+
+# 第三方参考产物（不随仓库分发）
+_ref_*.json
+_ref_*.dll

@@ -61,6 +61,24 @@ namespace AmongUsAntiCheat
         private const float RiskCheckInterval = 0.2f;
         private static float _nextRiskCheckTime;
 
+        /// <summary>复用的玩家缓冲区：避免每次采样都分配一个列表。</summary>
+        private static readonly List<PlayerControl> PlayerBuffer = new List<PlayerControl>(16);
+
+        /// <summary>采样轮次计数，用于死亡玩家跳帧。</summary>
+        private static int _sampleTick;
+
+        // ================= 性能探针 =================
+        // 用途：当用户怀疑「装了插件就掉帧」时，能拿出本模组自身的真实开销，
+        // 而不是靠猜。只在配置打开时才计时，避免探针本身成为负担。
+
+        private static readonly System.Diagnostics.Stopwatch PerfWatch = new System.Diagnostics.Stopwatch();
+        private static double _perfAccumMs;
+        private static int _perfFrames;
+        private static float _nextPerfReportTime;
+
+        /// <summary>单帧开销告警阈值（毫秒）。超过它说明本模组在拖后腿。</summary>
+        private const double PerfWarnMs = 2.0;
+
         /// <summary>复用的证据缓冲，避免每帧分配列表。</summary>
         private static readonly List<Violation> EvidenceBuffer = new List<Violation>(16);
 
@@ -240,6 +258,47 @@ namespace AmongUsAntiCheat
         {
             if (!IsReady) return;
 
+            // 性能探针：只统计本模组自身的开销，不含游戏逻辑
+            var probing = Config?.PerfProbe?.Value ?? false;
+            if (probing) PerfWatch.Restart();
+
+            try
+            {
+                TickCore(now, deltaTime);
+            }
+            finally
+            {
+                if (probing) ReportPerf(now);
+            }
+        }
+
+        /// <summary>累计并定期上报本模组的每帧开销。</summary>
+        private static void ReportPerf(float now)
+        {
+            PerfWatch.Stop();
+            _perfAccumMs += PerfWatch.Elapsed.TotalMilliseconds;
+            _perfFrames++;
+
+            if (now < _nextPerfReportTime) return;
+            _nextPerfReportTime = now + 5f;
+
+            if (_perfFrames == 0) return;
+            var avg = _perfAccumMs / _perfFrames;
+            _perfAccumMs = 0;
+            _perfFrames = 0;
+
+            if (avg >= PerfWarnMs)
+                Log?.LogWarning($"[性能探针] 检测循环平均每帧 {avg:F2} ms，"
+                              + $"超过阈值 {PerfWarnMs:F1} ms（追踪玩家 {Tracker?.Tracks.Count ?? 0} 人）。"
+                              + "考虑打开「低负载模式」。");
+            else if (Config?.VerboseLogging?.Value ?? false)
+                Log?.LogInfo($"[性能探针] 检测循环平均每帧 {avg:F3} ms。");
+        }
+
+        private static void TickCore(float now, float deltaTime)
+        {
+            if (!IsReady) return;
+
             // 先跑热重载检测：用户可能在游戏外改了配置文件。
             HotReloader?.Tick(now);
 
@@ -267,10 +326,12 @@ namespace AmongUsAntiCheat
                 return;
             }
 
-            // 采样
+            // 采样（低负载模式下把间隔拉长一倍，用灵敏度换帧率）
             if (Config.EnableBehaviorScan.Value && now >= _nextSampleTime)
             {
-                _nextSampleTime = now + Config.SampleInterval.Value;
+                var interval = Config.SampleInterval.Value;
+                if (Config.PerfLowLoad.Value) interval *= 2f;
+                _nextSampleTime = now + interval;
                 SampleAllPlayers(now, inMeeting);
             }
 
@@ -292,18 +353,30 @@ namespace AmongUsAntiCheat
 
         private static void SampleAllPlayers(float now, bool inMeeting)
         {
-            var players = GameBridge.GetPlayers();
-            if (players.Count == 0) return;
+            // 复用缓冲区：热路径不分配新列表
+            GameBridge.GetPlayersInto(PlayerBuffer);
+            if (PlayerBuffer.Count == 0) return;
+
+            _sampleTick++;
 
             var maxSpeed = GameBridge.GetMaxAllowedSpeed() * Config.MaxSpeedTolerance.Value;
             var grace = Config.RoundStartGracePeriod.Value;
 
-            foreach (var player in players)
+            // 死亡玩家降频：死人不会再瞬移/超速，没必要每轮都做全套采样。
+            // 这是移植自 Amethyst 的「不更新死亡玩家 + 跳帧」策略。
+            var skipDead = Config.PerfDontUpdateDead.Value;
+            var deadEvery = System.Math.Max(1, Config.PerfDeadSkipFrames.Value);
+            var skipThisTick = deadEvery > 1 && (_sampleTick % deadEvery) != 0;
+
+            foreach (var player in PlayerBuffer)
             {
                 if (player == null) continue;
 
                 var playerId = GameBridge.GetPlayerId(player);
                 if (playerId < 0) continue;
+
+                var isDead = GameBridge.IsDead(player);
+                if (skipDead && isDead && skipThisTick) continue;
 
                 var name = GameBridge.GetPlayerName(player);
                 var track = Tracker.GetOrCreate(playerId, name, now);
@@ -316,7 +389,7 @@ namespace AmongUsAntiCheat
                 {
                     Time = now,
                     Position = GameBridge.GetPosition(player),
-                    IsDead = GameBridge.IsDead(player),
+                    IsDead = isDead,
                     InVent = GameBridge.IsInVent(player),
                     IsImpostor = GameBridge.IsImpostor(player),
                     CanVent = canVent,

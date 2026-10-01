@@ -80,19 +80,33 @@ namespace AmongUsAntiCheat
         public static List<PlayerControl> GetPlayers()
         {
             var result = new List<PlayerControl>(16);
+            GetPlayersInto(result);
+            return result;
+        }
+
+        /// <summary>
+        /// 把当前玩家填充进调用方提供的缓冲区（会先 Clear）。
+        ///
+        /// 热路径专用：采样每 0.1 秒跑一次，用 <see cref="GetPlayers"/> 会产生
+        /// 每秒 10 个列表的垃圾。调用方必须**立即消费**缓冲区内容，
+        /// 不要跨帧持有它——下一次调用会把它清空。
+        /// </summary>
+        public static void GetPlayersInto(List<PlayerControl> buffer)
+        {
+            if (buffer == null) return;
+            buffer.Clear();
             try
             {
                 var all = PlayerControl.AllPlayerControls;
-                if (all == null) return result;
+                if (all == null) return;
 
                 for (var i = 0; i < all.Count; i++)
                 {
                     var p = all[i];
-                    if (p != null) result.Add(p);
+                    if (p != null) buffer.Add(p);
                 }
             }
             catch { /* 忽略：游戏未初始化时该集合可能不可用 */ }
-            return result;
         }
 
         public static PlayerControl GetLocalPlayer()

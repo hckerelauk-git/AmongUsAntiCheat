@@ -148,6 +148,20 @@ namespace AmongUsAntiCheat.Config
         /// <summary>昵称最大长度（字符）。</summary>
         public readonly ConfigEntry<int> NameMaxLength;
 
+        // ================= 性能 =================
+
+        /// <summary>不更新死亡玩家（死人不需要做运动学分析）。</summary>
+        public readonly ConfigEntry<bool> PerfDontUpdateDead;
+
+        /// <summary>死亡玩家的更新跳帧间隔（每 N 次采样才算一次）。</summary>
+        public readonly ConfigEntry<int> PerfDeadSkipFrames;
+
+        /// <summary>低负载模式：整体降低检测频率，牺牲灵敏度换流畅度。</summary>
+        public readonly ConfigEntry<bool> PerfLowLoad;
+
+        /// <summary>性能探针：测量本模组自身的每帧开销，超阈值时打日志。</summary>
+        public readonly ConfigEntry<bool> PerfProbe;
+
         // ================= 白名单 =================
 
         public readonly ConfigEntry<string> TrustedPluginGuids;
@@ -361,6 +375,26 @@ namespace AmongUsAntiCheat.Config
                 new ConfigDescription(
                     "超过这个长度就算异常。游戏原生上限是 10，这里留了余量。",
                     new AcceptableValueRange<int>(5, 60)));
+
+            // ---------------- 性能 ----------------
+            const string M = "性能";
+            PerfDontUpdateDead = cfg.Bind(M, "不更新死亡玩家", true,
+                "死了的人不用再算走位，省下来的开销很可观。" + NL +
+                "被杀的瞬间仍会做一次判定，不影响检测准确性。");
+            PerfDeadSkipFrames = cfg.Bind(M, "死亡玩家跳几帧才算一次", 5,
+                new ConfigDescription(
+                    "死亡玩家每隔这么多次采样才处理一次。" + NL +
+                    "调到 1 就是每次都算（最费），调大更省。" + NL +
+                    "只有在「不更新死亡玩家」开着时才生效。",
+                    new AcceptableValueRange<int>(1, 30)));
+            PerfLowLoad = cfg.Bind(M, "低负载模式", false,
+                "整体把检测频率降下来，换来更稳的帧率。" + NL +
+                "机器差、或者人多的房间卡顿时打开它。" + NL +
+                "代价是抓瞬移的灵敏度会下降（采样间隔变长）。");
+            PerfProbe = cfg.Bind(M, "性能探针（排查卡顿用）", false,
+                "记录本模组自己每帧花了多少时间，超过阈值就写日志。" + NL +
+                "怀疑是插件导致掉帧时打开它，日志里搜 [性能探针]。" + NL +
+                "平时请关着。");
 
             // ---------------- 白名单 ----------------
             const string J = "白名单";            TrustedPluginGuids = cfg.Bind(J, "信任的插件 GUID", "",
