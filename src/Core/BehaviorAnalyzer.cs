@@ -31,6 +31,12 @@ namespace AmongUsAntiCheat.Core
         private const float MeetingMoveReportCooldown = 1.0f;
 
         /// <summary>
+        /// 瞬移判定的速度倍率：隐含速度必须超过「允许上限 × 该倍率」才算瞬移。
+        /// 取 3 倍是为了给「速度上限本身估算偏低」留出余量，进一步压低误报。
+        /// </summary>
+        private const float TeleportSpeedFactor = 3f;
+
+        /// <summary>
         /// 由 Unity 侧注入的墙体检测委托：给定世界坐标，返回是否位于墙体内。
         /// 用委托而不是直接引用 Physics2D，是为了让本类保持可独立测试。
         /// 为 null 时自动跳过穿墙检测。
@@ -110,7 +116,16 @@ namespace AmongUsAntiCheat.Core
             }
 
             // ---------- 判定一：瞬移 ----------
-            if (distance >= _cfg.TeleportMinDistance.Value)
+            // 必须同时满足两个条件才算瞬移：
+            //   ① 位移够大（超过 TeleportMinDistance）
+            //   ② 该位移在当前耗时内物理上不可能完成（隐含速度远超上限）
+            //
+            // 只比距离是早期版本的 bug：采样间隔被拉长或游戏卡顿时，
+            // 正常玩家一次也能"跳"出好几个单位，于是被误判成瞬移。
+            // 加入 ② 之后，隐含速度会随 dt 一起回落，卡顿不再制造误报。
+            var impliedSpeed = distance / dt;
+            var impossibleSpeed = maxAllowedSpeed * TeleportSpeedFactor;
+            if (distance >= _cfg.TeleportMinDistance.Value && impliedSpeed > impossibleSpeed)
             {
                 ReportTeleport(track, now, distance, dt, output);
                 track.ConsecutiveSpeedStrikes = 0;
@@ -423,8 +438,14 @@ namespace AmongUsAntiCheat.Core
         {
             if (track == null) return;
 
-            // 非内鬼不能使用通风管
-            if (!track.Current.IsImpostor && !track.Current.IsDead)
+            // 非法使用通风管：按「角色能力」判定，而不是阵营。
+            //
+            // 历史教训：早期用 !IsImpostor 判断，把 Viper（船员阵营、Role.CanVent=true）
+            // 和躲猫猫的 Seeker 一律判成 Critical 直接踢掉，是典型误杀。
+            // 现在要求：① 角色能力已知 ② 该角色确实没有通风能力 ③ 人还活着。
+            // 角色信息拿不到时一律放行（宁可漏报，不可冤判）。
+            if (_cfg.VentNonImpostor.Value &&
+                track.Current.RoleKnown && !track.Current.CanVent && !track.Current.IsDead)
             {
                 output.Add(new Violation(
                     ViolationKind.IllegalVent,
@@ -432,13 +453,15 @@ namespace AmongUsAntiCheat.Core
                     track.PlayerId,
                     track.Name,
                     now,
-                    "非内鬼玩家使用了通风管。",
+                    "角色不具备通风能力，却使用了通风管。",
                     new Dictionary<string, float>()));
                 track.FlaggedThisRound = true;
                 return;
             }
 
             // 距离校验：通风管必须在身边
+            if (!_cfg.VentRemote.Value) return;
+
             var distance = GameVec2.Distance(track.Current.Position, ventPosition);
             var tolerance = _cfg.VentDistanceTolerance?.Value ?? _cfg.RemoteTaskTolerance.Value;
             if (distance > tolerance)
@@ -484,6 +507,398 @@ namespace AmongUsAntiCheat.Core
                 $"已死亡玩家执行了活人动作：{action}。",
                 new Dictionary<string, float>()));
             track.FlaggedThisRound = true;
+        }
+
+        // ==================================================================
+        //  破坏系统
+        // ==================================================================
+
+        /// <summary>通用动作去重冷却：同一玩家在窗口内不重复上报同类动作。</summary>
+        private const float ActionReportCooldown = 1.0f;
+
+        /// <summary>
+        /// 校验一次破坏系统触发。
+        ///
+        /// 破坏是内鬼专属能力，且会议期间不应发生。
+        /// 角色信息不可用时**不判罚**——这是刻意的保守设计，避免把未知角色误伤。
+        /// </summary>
+        public void AnalyzeSabotage(
+            PlayerTrack track,
+            bool isImpostor,
+            bool roleKnown,
+            bool isDead,
+            string systemName,
+            bool inMeeting,
+            float now,
+            List<Violation> output)
+        {
+            if (track == null || isDead) return;
+            if (!_cfg.SabotageCheck.Value) return;
+            if (now - track.LastActionReportTime < ActionReportCooldown) return;
+
+            // ① 会议期间触发破坏：所有人都被定在会议桌，物理上不可能
+            if (inMeeting)
+            {
+                track.LastActionReportTime = now;
+                track.FlaggedThisRound = true;
+                output.Add(new Violation(
+                    ViolationKind.SabotageDuringMeeting,
+                    Severity.Critical,
+                    track.PlayerId, track.Name, now,
+                    $"会议进行中触发了破坏系统「{systemName}」。",
+                    new Dictionary<string, float>()));
+                return;
+            }
+
+            // ② 非内鬼触发破坏（仅在角色信息可读时判定）
+            if (roleKnown && !isImpostor)
+            {
+                track.LastActionReportTime = now;
+                track.FlaggedThisRound = true;
+                output.Add(new Violation(
+                    ViolationKind.SabotageWhileNotImpostor,
+                    Severity.Critical,
+                    track.PlayerId, track.Name, now,
+                    $"不具备内鬼身份的玩家触发了破坏系统「{systemName}」。",
+                    new Dictionary<string, float>()));
+            }
+        }
+
+        /// <summary>破坏目标编号越界（伪造 / 改包）。</summary>
+        public void AnalyzeSabotageTarget(
+            PlayerTrack track, string systemName, int systemId, int validCount,
+            float now, List<Violation> output)
+        {
+            if (track == null || validCount <= 0) return;
+            if (!_cfg.SabotageCheck.Value) return;
+            if (systemId >= 0 && systemId < validCount) return;
+
+            output.Add(new Violation(
+                ViolationKind.InvalidSabotageTarget,
+                Severity.Critical,
+                track.PlayerId, track.Name, now,
+                $"破坏目标编号越界：{systemId}（合法范围 0~{validCount - 1}），系统名「{systemName}」。",
+                new Dictionary<string, float>
+                {
+                    ["system_id"] = systemId,
+                    ["valid_count"] = validCount,
+                }));
+            track.FlaggedThisRound = true;
+        }
+
+        // ==================================================================
+        //  会议
+        // ==================================================================
+
+        /// <summary>
+        /// 开局保护期内发起会议 / 报告尸体。
+        /// 常见于刷屏骚扰，或想破坏开局的节奏。
+        /// </summary>
+        public void AnalyzeEarlyMeeting(
+            PlayerTrack track, float roundElapsed, string action,
+            float now, List<Violation> output)
+        {
+            if (track == null) return;
+            if (!_cfg.BlockEarlyMeeting.Value) return;
+
+            var grace = _cfg.EarlyMeetingGrace.Value;
+            if (grace <= 0f || roundElapsed < 0f || roundElapsed >= grace) return;
+            if (now - track.LastActionReportTime < ActionReportCooldown) return;
+
+            track.LastActionReportTime = now;
+            track.FlaggedThisRound = true;
+
+            output.Add(new Violation(
+                ViolationKind.EarlyMeeting,
+                Severity.High,
+                track.PlayerId, track.Name, now,
+                $"开局 {roundElapsed:F1} 秒内发起{action}（保护期为 {grace:F0} 秒）。",
+                new Dictionary<string, float>
+                {
+                    ["round_elapsed"] = roundElapsed,
+                    ["grace"] = grace,
+                }));
+        }
+
+        // ==================================================================
+        //  聊天
+        // ==================================================================
+
+        /// <summary>
+        /// 校验一条聊天消息：刷屏频率 + 内容合法性。
+        /// </summary>
+        public void AnalyzeChat(
+            PlayerTrack track, string text, float now, List<Violation> output)
+        {
+            if (track == null) return;
+            if (!_cfg.ChatCheck.Value) return;
+
+            // ---------- 内容合法性 ----------
+            if (string.IsNullOrEmpty(text))
+            {
+                output.Add(new Violation(
+                    ViolationKind.IllegalChat,
+                    Severity.Medium,
+                    track.PlayerId, track.Name, now,
+                    "发送了空聊天消息。",
+                    new Dictionary<string, float>()));
+                track.FlaggedThisRound = true;
+            }
+            else if (text.Length > 300)
+            {
+                output.Add(new Violation(
+                    ViolationKind.IllegalChat,
+                    Severity.High,
+                    track.PlayerId, track.Name, now,
+                    $"聊天消息过长（{text.Length} 字符），可能用于撑爆他人聊天框。",
+                    new Dictionary<string, float> { ["length"] = text.Length }));
+                track.FlaggedThisRound = true;
+            }
+            else if (ContainsControlChar(text))
+            {
+                output.Add(new Violation(
+                    ViolationKind.IllegalChat,
+                    Severity.High,
+                    track.PlayerId, track.Name, now,
+                    "聊天消息中包含控制字符。",
+                    new Dictionary<string, float>()));
+                track.FlaggedThisRound = true;
+            }
+
+            // ---------- 刷屏频率（10 秒滑动窗口） ----------
+            const float Window = 10f;
+            track.ChatTimes.Enqueue(now);
+            while (track.ChatTimes.Count > 0 && now - track.ChatTimes.Peek() > Window)
+                track.ChatTimes.Dequeue();
+
+            var limit = _cfg.ChatRateLimit.Value;
+            if (track.ChatTimes.Count <= limit) return;
+            if (now - track.LastChatReportTime < 2f) return;
+
+            track.LastChatReportTime = now;
+            track.FlaggedThisRound = true;
+
+            output.Add(new Violation(
+                ViolationKind.ChatFlood,
+                Severity.High,
+                track.PlayerId, track.Name, now,
+                $"{Window:F0} 秒内发送了 {track.ChatTimes.Count} 条聊天消息（上限 {limit} 条）。",
+                new Dictionary<string, float>
+                {
+                    ["count"] = track.ChatTimes.Count,
+                    ["limit"] = limit,
+                    ["window"] = Window,
+                }));
+        }
+
+        /// <summary>是否含控制字符（换行 / 制表 / 其它不可打印字符）。</summary>
+        private static bool ContainsControlChar(string s)
+        {
+            foreach (var c in s)
+            {
+                if (char.IsControl(c) && c != '\u0000') return true;
+            }
+            return false;
+        }
+
+        // ==================================================================
+        //  昵称
+        // ==================================================================
+
+        /// <summary>校验昵称合法性。</summary>
+        public void AnalyzeName(
+            PlayerTrack track, string rawName, float now, List<Violation> output)
+        {
+            if (track == null) return;
+            if (!_cfg.NameCheck.Value) return;
+
+            if (string.IsNullOrWhiteSpace(rawName))
+            {
+                output.Add(new Violation(
+                    ViolationKind.IllegalName,
+                    Severity.Medium,
+                    track.PlayerId, track.Name, now,
+                    "昵称为空或全为空白字符。",
+                    new Dictionary<string, float>()));
+                track.FlaggedThisRound = true;
+                return;
+            }
+
+            var max = _cfg.NameMaxLength.Value;
+            if (rawName.Length > max)
+            {
+                output.Add(new Violation(
+                    ViolationKind.IllegalName,
+                    Severity.High,
+                    track.PlayerId, track.Name, now,
+                    $"昵称过长（{rawName.Length} 字符，上限 {max}）。",
+                    new Dictionary<string, float>
+                    {
+                        ["length"] = rawName.Length,
+                        ["max"] = max,
+                    }));
+                track.FlaggedThisRound = true;
+                return;
+            }
+
+            if (ContainsControlChar(rawName))
+            {
+                output.Add(new Violation(
+                    ViolationKind.IllegalName,
+                    Severity.High,
+                    track.PlayerId, track.Name, now,
+                    "昵称中包含控制字符（换行 / 制表等）。",
+                    new Dictionary<string, float>()));
+                track.FlaggedThisRound = true;
+            }
+        }
+
+        // ==================================================================
+        //  角色动作
+        // ==================================================================
+
+        /// <summary>校验变形动作：只有变形者能变形。</summary>
+        public void AnalyzeShapeshift(
+            PlayerTrack track, bool isShifter, bool roleKnown, bool isDead,
+            float now, List<Violation> output)
+        {
+            if (track == null || isDead) return;
+            if (!_cfg.RoleActionCheck.Value) return;
+            if (!roleKnown || isShifter) return;   // 角色未知 → 放行
+
+            output.Add(new Violation(
+                ViolationKind.IllegalShapeshift,
+                Severity.Critical,
+                track.PlayerId, track.Name, now,
+                "不具备变形能力的角色执行了变形。",
+                new Dictionary<string, float>()));
+            track.FlaggedThisRound = true;
+        }
+
+        /// <summary>校验保护动作：只有守护天使能保护。</summary>
+        public void AnalyzeProtect(
+            PlayerTrack track, bool isGuardian, bool roleKnown, bool isDead,
+            float now, List<Violation> output)
+        {
+            if (track == null || isDead) return;
+            if (!_cfg.RoleActionCheck.Value) return;
+            if (!roleKnown || isGuardian) return;  // 角色未知 → 放行
+
+            output.Add(new Violation(
+                ViolationKind.IllegalProtect,
+                Severity.Critical,
+                track.PlayerId, track.Name, now,
+                "不具备保护能力的角色执行了保护。",
+                new Dictionary<string, float>()));
+            track.FlaggedThisRound = true;
+        }
+
+        // ==================================================================
+        //  通风管 / 滑索 进阶
+        // ==================================================================
+
+        /// <summary>
+        /// 校验一次通风管操作（PerformVentOp）。
+        /// 覆盖：伪造管道编号、会议期间使用。
+        /// </summary>
+        public void AnalyzeVentOp(
+            PlayerTrack track, int ventId, bool? validVentId, bool inMeeting,
+            float now, List<Violation> output)
+        {
+            if (track == null) return;
+
+            // ① 伪造管道编号
+            if (_cfg.VentForgedId.Value && validVentId == false)
+            {
+                output.Add(new Violation(
+                    ViolationKind.VentForgedId,
+                    Severity.Critical,
+                    track.PlayerId, track.Name, now,
+                    $"使用了不存在的通风管编号 {ventId}。",
+                    new Dictionary<string, float> { ["vent_id"] = ventId }));
+                track.FlaggedThisRound = true;
+                return;
+            }
+
+            // ② 会议期间使用通风管
+            if (_cfg.VentDuringMeeting.Value && inMeeting)
+            {
+                if (now - track.LastActionReportTime < ActionReportCooldown) return;
+                track.LastActionReportTime = now;
+                track.FlaggedThisRound = true;
+
+                output.Add(new Violation(
+                    ViolationKind.VentDuringMeeting,
+                    Severity.Critical,
+                    track.PlayerId, track.Name, now,
+                    "会议进行中使用了通风管。",
+                    new Dictionary<string, float> { ["vent_id"] = ventId }));
+            }
+        }
+
+        /// <summary>
+        /// 非房主强制把他人踢出通风管（BootImpostorFromVent 类 RPC）。
+        /// 这是权限提升类漏洞，普通玩家不应有该能力。
+        /// </summary>
+        public void AnalyzeVentForce(
+            PlayerTrack track, bool senderIsHost, string method,
+            float now, List<Violation> output)
+        {
+            if (track == null) return;
+            if (!_cfg.VentForceOther.Value) return;
+            if (senderIsHost) return;   // 房主自己触发是合法的
+
+            output.Add(new Violation(
+                ViolationKind.VentForceOther,
+                Severity.Critical,
+                track.PlayerId, track.Name, now,
+                $"非房主通过 {method} 强制把其他玩家踢出通风管。",
+                new Dictionary<string, float>()));
+            track.FlaggedThisRound = true;
+        }
+
+        /// <summary>滑索使用异常：会议期间使用。</summary>
+        public void AnalyzeZipline(
+            PlayerTrack track, bool inMeeting, bool isDead, float now, List<Violation> output)
+        {
+            if (track == null || isDead) return;
+            if (!_cfg.ZiplineAbuse.Value) return;
+            if (!inMeeting) return;
+
+            if (now - track.LastActionReportTime < ActionReportCooldown) return;
+            track.LastActionReportTime = now;
+            track.FlaggedThisRound = true;
+
+            output.Add(new Violation(
+                ViolationKind.ZiplineAbuse,
+                Severity.High,
+                track.PlayerId, track.Name, now,
+                "会议进行中使用了滑索。",
+                new Dictionary<string, float>()));
+        }
+
+        // ==================================================================
+        //  网络
+        // ==================================================================
+
+        /// <summary>收到异常大的数据包。</summary>
+        public void AnalyzeOversizedPacket(
+            int playerId, string playerName, int size, int limit,
+            float now, List<Violation> output)
+        {
+            if (!_cfg.OversizedPacketCheck.Value) return;
+            if (size <= limit) return;
+
+            output.Add(new Violation(
+                ViolationKind.OversizedPacket,
+                Severity.High,
+                playerId, playerName, now,
+                $"收到异常大的数据包（{size} 字节，上限 {limit}）。",
+                new Dictionary<string, float>
+                {
+                    ["size"] = size,
+                    ["limit"] = limit,
+                }));
         }
     }
 }

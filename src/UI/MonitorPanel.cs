@@ -52,6 +52,23 @@ namespace AmongUsAntiCheat.UI
         /// </summary>
         private const float ShowDelaySeconds = 4.6f;
 
+        /// <summary>
+        /// 面板刷新间隔（秒）。
+        ///
+        /// 必须节流：Refresh() 会遍历全部玩家、排序、拼字符串并赋值给 Text。
+        /// 早期版本每帧都跑一遍，等于每秒 60 次列表分配 + 字符串分配，
+        /// 持续制造 GC 压力——这是"装了插件就掉帧"的主要原因。
+        /// 面板是给人看的，5Hz 已经绰绰有余。
+        /// </summary>
+        private const float RefreshInterval = 0.2f;
+        private static float _nextRefreshTime;
+
+        /// <summary>复用的列表，避免每次刷新都 new 一个。</summary>
+        private static readonly List<PlayerVerdict> FlaggedBuffer = new List<PlayerVerdict>(16);
+
+        /// <summary>复用的字符串构建器。</summary>
+        private static readonly StringBuilder TextBuffer = new StringBuilder(512);
+
         public static void EnsureBuilt(Transform canvasRoot)
         {
             if (_built || canvasRoot == null) return;
@@ -166,6 +183,11 @@ namespace AmongUsAntiCheat.UI
             if (_root.activeSelf != shouldShow) _root.SetActive(shouldShow);
             if (!shouldShow) return;
 
+            // 节流：不到刷新时刻直接返回，不重算、不拼串、不赋值。
+            var now = Time.time;
+            if (now < _nextRefreshTime) return;
+            _nextRefreshTime = now + RefreshInterval;
+
             try { Refresh(); }
             catch { /* 刷新失败不影响游戏 */ }
         }
@@ -197,7 +219,8 @@ namespace AmongUsAntiCheat.UI
             var cfg = AntiCheatRuntime.Config;
             var ranked = verdicts.RankedVerdicts();
 
-            var flagged = new List<PlayerVerdict>();
+            var flagged = FlaggedBuffer;
+            flagged.Clear();
             var maxLevel = RiskLevel.Normal;
 
             foreach (var v in ranked)
@@ -227,7 +250,8 @@ namespace AmongUsAntiCheat.UI
             foreach (var v in flagged)
                 if (v.EvidenceCount > scale) scale = v.EvidenceCount;
 
-            var sb = new StringBuilder(256);
+            var sb = TextBuffer;
+            sb.Clear();
             var rows = Mathf.Min(flagged.Count, MaxRows);
             for (var i = 0; i < rows; i++)
             {

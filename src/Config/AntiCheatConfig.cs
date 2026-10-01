@@ -128,6 +128,26 @@ namespace AmongUsAntiCheat.Config
         public readonly ConfigEntry<float> EarlyMeetingGrace;
         public readonly ConfigEntry<bool> OversizedPacketCheck;
 
+        // ================= 进阶检测 =================
+
+        /// <summary>抓非法破坏（非内鬼破坏 / 会议中破坏 / 越界目标）。</summary>
+        public readonly ConfigEntry<bool> SabotageCheck;
+
+        /// <summary>抓角色动作异常（非变形者变形 / 非守护天使保护）。</summary>
+        public readonly ConfigEntry<bool> RoleActionCheck;
+
+        /// <summary>抓聊天刷屏与非法消息内容。</summary>
+        public readonly ConfigEntry<bool> ChatCheck;
+
+        /// <summary>聊天频率上限（条 / 10 秒）。</summary>
+        public readonly ConfigEntry<int> ChatRateLimit;
+
+        /// <summary>抓非法昵称（空、超长、含控制字符）。</summary>
+        public readonly ConfigEntry<bool> NameCheck;
+
+        /// <summary>昵称最大长度（字符）。</summary>
+        public readonly ConfigEntry<int> NameMaxLength;
+
         // ================= 白名单 =================
 
         public readonly ConfigEntry<string> TrustedPluginGuids;
@@ -318,9 +338,32 @@ namespace AmongUsAntiCheat.Config
             OversizedPacketCheck = cfg.Bind(I, "抓超大数据包", true,
                 "异常大的数据包，可能是想拖垮所有人。");
 
+            // ---------------- 进阶检测 ----------------
+            const string L = "进阶检测";
+            SabotageCheck = cfg.Bind(L, "抓非法破坏", true,
+                "破坏系统只有内鬼能触发，且会议期间不该发生。" + NL +
+                "这项抓的是：非内鬼破坏、会议中破坏、以及越界/无效的破坏目标。");
+            RoleActionCheck = cfg.Bind(L, "抓角色动作异常", true,
+                "变形只有变形者能用，保护只有守护天使能用。" + NL +
+                "拿不到角色信息时会放行，不会误伤。");
+            ChatCheck = cfg.Bind(L, "抓聊天刷屏和非法消息", true,
+                "短时间内疯狂发消息会把聊天框刷爆，也可能是在卡别人。" + NL +
+                "同时拦截空消息、超长消息和含控制字符的消息。");
+            ChatRateLimit = cfg.Bind(L, "10 秒内最多几条消息", 8,
+                new ConfigDescription(
+                    "超过这个数量就算刷屏。" + NL +
+                    "正常聊天很难达到 8 条，遇到误报可以往上调。",
+                    new AcceptableValueRange<int>(3, 50)));
+            NameCheck = cfg.Bind(L, "抓非法昵称", true,
+                "空昵称、超长昵称、含换行或控制字符的昵称都会被抓。" + NL +
+                "有些外挂用超长昵称撑爆别人的聊天框。");
+            NameMaxLength = cfg.Bind(L, "昵称最长多少字", 20,
+                new ConfigDescription(
+                    "超过这个长度就算异常。游戏原生上限是 10，这里留了余量。",
+                    new AcceptableValueRange<int>(5, 60)));
+
             // ---------------- 白名单 ----------------
-            const string J = "白名单";
-            TrustedPluginGuids = cfg.Bind(J, "信任的插件 GUID", "",
+            const string J = "白名单";            TrustedPluginGuids = cfg.Bind(J, "信任的插件 GUID", "",
                 "用英文逗号隔开。列在这里的插件就算被误判也不会拦。一般不用填。");
             TrustedPluginNames = cfg.Bind(J, "信任的插件名", "",
                 "用英文逗号隔开。按插件名字匹配，认不出 GUID 时用这个。一般不用填。");

@@ -200,11 +200,136 @@ namespace AmongUsAntiCheat
             return false;
         }
 
+        /// <summary>
+        /// 读取玩家「能否使用通风管」的角色能力。
+        ///
+        /// ⚠️ 必须用 Role.CanVent，**不能**用 IsImpostor 代替：
+        /// 本版游戏存在 Viper（船员阵营、但被允许钻管道）这类角色，
+        /// 拿阵营去判「非内鬼进管道 = 作弊」会把 Viper 误判成 Critical 直接踢掉。
+        /// 拿不到角色对象时返回 false（表示「未知」），由调用方决定是否放行——
+        /// 遵循宁可漏报不误伤的原则。
+        /// </summary>
+        /// <param name="player">目标玩家。</param>
+        /// <param name="canVent">角色能力；仅在返回 true 时有效。</param>
+        /// <returns>是否成功取到角色能力（false = 角色信息不可用）。</returns>
+        public static bool TryGetCanVent(PlayerControl player, out bool canVent)
+        {
+            canVent = true;
+            if (player == null) return false;
+
+            try
+            {
+                var role = player.Data?.Role;
+                if (role != null)
+                {
+                    canVent = role.CanVent;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
         /// <summary>玩家当前能否移动。</summary>
         public static bool CanMove(PlayerControl player)
         {
             try { return player != null && player.CanMove; }
             catch { return true; }
+        }
+
+        // ==================================================================
+        //  游戏模式与角色能力
+        // ==================================================================
+
+        /// <summary>取飞船状态对象；不在对局中时为 null。</summary>
+        public static ShipStatus GetShipStatus()
+        {
+            try { return ShipStatus.Instance; }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// 是否为躲猫猫（Hide &amp; Seek）模式。
+        ///
+        /// 用途：躲猫猫的规则与经典模式差别很大（Seeker 能钻管道、船员不能报告尸体、
+        /// 破坏系统行为不同），凡是模式相关的判定都必须先问这一句。
+        /// 拿不到模式信息时返回 false（按经典模式处理）。
+        /// </summary>
+        public static bool IsHideAndSeek
+        {
+            get
+            {
+                try
+                {
+                    var opts = GameOptionsManager.Instance?.CurrentGameOptions;
+                    if (opts == null) return false;
+                    return opts.GameMode == GameModes.HideNSeek;
+                }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>取玩家的角色类型。拿不到时返回 <c>null</c>。</summary>
+        public static RoleTypes? GetRoleType(PlayerControl player)
+        {
+            try
+            {
+                if (player?.Data == null) return null;
+                return player.Data.RoleType;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// 玩家是否为变形者（Shapeshifter）。
+        /// 信息不可用时返回 false —— 调用方**必须**配合 <see cref="IsRoleKnown"/> 使用，
+        /// 否则会把角色未就绪的正常玩家误判成作弊。
+        /// </summary>
+        public static bool IsShapeshifter(PlayerControl player)
+        {
+            try { return player?.Data?.RoleType == RoleTypes.Shapeshifter; }
+            catch { return false; }
+        }
+
+        /// <summary>玩家是否为守护天使（GuardianAngel）。信息不可用时返回 false。</summary>
+        public static bool IsGuardianAngel(PlayerControl player)
+        {
+            try { return player?.Data?.RoleType == RoleTypes.GuardianAngel; }
+            catch { return false; }
+        }
+
+        /// <summary>角色信息是否可读（Role 对象已就绪）。不可读时不应做角色相关判罚。</summary>
+        public static bool IsRoleKnown(PlayerControl player)
+        {
+            try { return player?.Data?.Role != null; }
+            catch { return false; }
+        }
+
+        // ==================================================================
+        //  通风管
+        // ==================================================================
+
+        /// <summary>当前地图的通风管总数。拿不到时返回 -1（表示「未知」）。</summary>
+        public static int GetVentCount()
+        {
+            try
+            {
+                var vents = ShipStatus.Instance?.AllVents;
+                return vents?.Length ?? -1;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>
+        /// 校验通风管编号是否在合法范围内。
+        /// 返回 <c>null</c> 表示无法判断（不应据此判罚）。
+        /// </summary>
+        public static bool? IsValidVentId(int ventId)
+        {
+            var count = GetVentCount();
+            if (count < 0) return null;
+            return ventId >= 0 && ventId < count;
         }
 
         // ==================================================================

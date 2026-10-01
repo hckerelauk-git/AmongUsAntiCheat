@@ -92,6 +92,15 @@ namespace AmongUsAntiCheat.Patches
 
                 var killer = AntiCheatRuntime.GetOrCreateTrack(killerId, GameBridge.GetPlayerName(__instance));
 
+                // 已死亡的玩家执行击杀 —— 幽灵动作，确定性证据。
+                // AnalyzeGhostAction 此前一直没有调用点，是死代码，这里正式接上。
+                if (GameBridge.IsDead(__instance))
+                {
+                    var ghostBuffer = new List<Violation>(1);
+                    AntiCheatRuntime.Analyzer.AnalyzeGhostAction(killer, Time.time, "击杀", ghostBuffer);
+                    foreach (var v in ghostBuffer) AntiCheatRuntime.Submit(v);
+                }
+
                 // 从参数里找受害者
                 var victimControl = PatchHelper.FirstArgOfType<PlayerControl>(__args);
                 PlayerTrack victim = null;

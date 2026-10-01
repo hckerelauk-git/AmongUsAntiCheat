@@ -24,6 +24,9 @@ namespace AmongUsAntiCheat.Core
         public bool Warned { get; set; }
         public bool KickIssued { get; set; }
 
+        /// <summary>本次处置是否同时要求封禁（由「动手的方式 = 封禁」推导）。</summary>
+        public bool BanRequested { get; set; }
+
         /// <summary>AI 二次研判是否已确认为作弊。</summary>
         public bool AiConfirmed { get; set; }
 
@@ -146,6 +149,10 @@ namespace AmongUsAntiCheat.Core
             _log.LogWarning(
                 $"[规则命中] {verdict.Name}({verdict.PlayerId}) 命中 {violation.Kind}，本局累计 {verdict.EvidenceCount} 条 | {violation.Detail}");
 
+            // 落盘留证（受「记录作弊判定」开关控制）
+            HistoryLog.RecordViolation(verdict.Name, verdict.PlayerId,
+                violation.Kind.ToString(), violation.Detail);
+
             Evaluate(verdict, now);
         }
 
@@ -169,8 +176,21 @@ namespace AmongUsAntiCheat.Core
 
             if (!verdict.KickIssued && level >= RiskLevel.HighRisk && _cfg.AllowAutoKick.Value)
             {
+                // 自动处置也要尊重「动手的方式」：
+                //   忽略 / 警告 → 即使开了自动踢人也不动手
+                //   踢出        → 踢出
+                //   封禁        → 踢出并附带封禁
+                var mode = _cfg.DispositionMode?.Value ?? DispositionModes.Warn;
+                if (!DispositionModes.CanKick(mode))
+                {
+                    if (!verdict.Warned) { /* 已在上面处理过警告，这里只是不踢 */ }
+                    return;
+                }
+
                 verdict.KickIssued = true;
-                _log.LogError($"[处置] 玩家「{verdict.Name}」命中确定性规则，执行处置。");
+                verdict.BanRequested = DispositionModes.ShouldBan(mode);
+
+                _log.LogError($"[处置] 玩家「{verdict.Name}」命中确定性规则，执行处置（{mode}）。");
                 KickRequested?.Invoke(verdict);
             }
         }

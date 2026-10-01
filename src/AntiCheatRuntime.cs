@@ -53,6 +53,14 @@ namespace AmongUsAntiCheat
         private static bool _wasInGame;
         private static bool _wasInMeeting;
 
+        /// <summary>
+        /// 风险等级巡检间隔（秒）。
+        /// 每帧遍历全部玩家判定并调用 EvaluateLevel 是不必要的开销，
+        /// 通知本身又是给人看的，5Hz 足够。
+        /// </summary>
+        private const float RiskCheckInterval = 0.2f;
+        private static float _nextRiskCheckTime;
+
         /// <summary>复用的证据缓冲，避免每帧分配列表。</summary>
         private static readonly List<Violation> EvidenceBuffer = new List<Violation>(16);
 
@@ -115,6 +123,14 @@ namespace AmongUsAntiCheat
 
         /// <summary>当前游戏时间。</summary>
         public static float Now => Time.time;
+
+        /// <summary>
+        /// 本回合开始的时刻（<see cref="Time.time"/>）。
+        /// 用于「开局保护期」类判定（如早会检测）。
+        /// 尚未进入过对局时返回 0，此时 <c>Now - RoundStartTime</c> 会是一个很大的值，
+        /// 不会误触发保护期逻辑。
+        /// </summary>
+        public static float RoundStartTime => _roundStartTime;
 
         /// <summary>补丁层提交证据的统一入口。</summary>
         public static void Submit(Violation violation)
@@ -205,6 +221,9 @@ namespace AmongUsAntiCheat
 
                 v.LastNotifiedLevel = level;
 
+                // 用户关掉了通知就只记日志，不弹卡片
+                if (!(cfg.ShowNotifications?.Value ?? true)) continue;
+
                 var reason = v.Evidence.Count > 0
                     ? v.Evidence[v.Evidence.Count - 1].Detail
                     : "行为异常";
@@ -261,8 +280,12 @@ namespace AmongUsAntiCheat
             // 把异步 AI 产物回收到 VerdictEngine（主线程）
             DrainAiResults();
 
-            // 判定等级升级 → 右下角弹通知
-            CheckRiskLevelChanges();
+            // 判定等级升级 → 右下角弹通知（节流到 5Hz，避免每帧全量遍历）
+            if (now >= _nextRiskCheckTime)
+            {
+                _nextRiskCheckTime = now + RiskCheckInterval;
+                CheckRiskLevelChanges();
+            }
         }
 
         // ================= 采样 =================
@@ -285,6 +308,10 @@ namespace AmongUsAntiCheat
                 var name = GameBridge.GetPlayerName(player);
                 var track = Tracker.GetOrCreate(playerId, name, now);
 
+                // 角色能力：用 Role.CanVent 而不是阵营，避免把 Viper 这类
+                // 「船员阵营但能钻管道」的角色误判成作弊。
+                var roleKnown = GameBridge.TryGetCanVent(player, out var canVent);
+
                 var snapshot = new PlayerSnapshot
                 {
                     Time = now,
@@ -292,6 +319,8 @@ namespace AmongUsAntiCheat
                     IsDead = GameBridge.IsDead(player),
                     InVent = GameBridge.IsInVent(player),
                     IsImpostor = GameBridge.IsImpostor(player),
+                    CanVent = canVent,
+                    RoleKnown = roleKnown,
                     CanMove = GameBridge.CanMove(player),
                     InMeeting = inMeeting,
                 };
@@ -324,6 +353,19 @@ namespace AmongUsAntiCheat
             GameBridge.InvalidateLayerCache();
 
             Log?.LogInfo("[反作弊] 检测到进入对局，已重置检测状态。");
+
+            // 记录本局玩家名单（受「记录谁进过房间」开关控制）
+            try
+            {
+                var names = new List<string>();
+                foreach (var p in GameBridge.GetPlayers())
+                {
+                    if (p == null) continue;
+                    names.Add(GameBridge.GetPlayerName(p));
+                }
+                Core.HistoryLog.RecordRoundPlayers(names);
+            }
+            catch { }
 
             // 静态扫描放在进入对局时做一次：此时插件已全部加载完毕，
             // 且不会拖慢游戏启动。
@@ -380,8 +422,8 @@ namespace AmongUsAntiCheat
                 return;
             }
 
-            if (GameBridge.KickPlayer(clientId))
-                Log?.LogError($"[处置] 已踢出作弊玩家「{verdict.Name}」(PlayerId={verdict.PlayerId}, ClientId={clientId})。");
+            if (GameBridge.KickPlayer(clientId, verdict.BanRequested))
+                Log?.LogError($"[处置] 已{(verdict.BanRequested ? "封禁" : "踢出")}作弊玩家「{verdict.Name}」(PlayerId={verdict.PlayerId}, ClientId={clientId})。");
             else
                 Log?.LogWarning($"[处置] 踢出「{verdict.Name}」失败——可能自己不是房主。");
         }

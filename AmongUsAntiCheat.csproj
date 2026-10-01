@@ -2,27 +2,33 @@
 
   <!--
     AmongUsAntiCheat —— Among Us (IL2CPP) 客户端反作弊插件
-    目标环境：BepInEx 6.0.0-be.735 / Unity 2022.3.44f1 / .NET 6.0.7 / x86
+    目标环境：BepInEx 6.0.0-be.735 / Unity 2022.3.44f1 / .NET 6.0.7
 
     编译：
       dotnet build -c Release
     如果游戏不在默认路径，用 -p:GameDir="你的路径" 覆盖。
+
+    架构说明（2026-10 修订）：
+      本插件编为 AnyCPU，同一份 dll 可被 32 位与 64 位游戏进程加载。
+      不要再把它锁成 x86——那样在 64 位进程里会直接 BadImageFormatException
+      加载失败。运行时架构相关的东西（指针宽度、P/Invoke 结构体尺寸）
+      已在代码里按 IntPtr 自适应处理。
   -->
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>AmongUsAntiCheat</AssemblyName>
     <RootNamespace>AmongUsAntiCheat</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.1.1</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- 游戏进程是 32 位，必须编成 x86 -->
-    <Platforms>x86</Platforms>
-    <PlatformTarget>x86</PlatformTarget>
-    <Prefer32Bit>true</Prefer32Bit>
+    <!-- 32/64 位通用：AnyCPU 才能同时装进 x86 与 x64 的游戏进程 -->
+    <Platforms>AnyCPU;x86;x64</Platforms>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
 
     <!-- BepInEx 插件不需要这些附属文件 -->
     <GenerateDependencyFile>false</GenerateDependencyFile>
@@ -30,10 +36,10 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <DebugType>none</DebugType>
-    <NoWarn>$(NoWarn);CS0436;CS0618</NoWarn>
+    <NoWarn>$(NoWarn);CS0436;CS0618;CA1416</NoWarn>
 
     <!-- ===== 路径配置 ===== -->
-    <GameDir Condition="'$(GameDir)' == ''">D:\Steam\steamapps\common\Among Us</GameDir>
+    <GameDir Condition="'$(GameDir)' == ''">E:\STEAM\steamapps\common\Among Us</GameDir>
     <BepInExCore>$(GameDir)\BepInEx\core</BepInExCore>
     <BepInExInterop>$(GameDir)\BepInEx\interop</BepInExInterop>
     <!--

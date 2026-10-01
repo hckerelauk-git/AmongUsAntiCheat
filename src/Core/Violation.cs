@@ -47,12 +47,48 @@ namespace AmongUsAntiCheat.Core
         MoveDuringMeeting,
         /// <summary>会议期间的投票/报告行为异常。</summary>
         IllegalMeetingAction,
+        /// <summary>开局保护期内发起会议 / 报告尸体（刷屏或破坏开局）。</summary>
+        EarlyMeeting,
+
+        // ---------- 破坏层 ----------
+        /// <summary>非内鬼阵营的玩家触发了破坏系统。</summary>
+        SabotageWhileNotImpostor,
+        /// <summary>会议期间触发破坏系统。</summary>
+        SabotageDuringMeeting,
+        /// <summary>向不存在的破坏目标 / 越界的系统编号发起破坏。</summary>
+        InvalidSabotageTarget,
+
+        // ---------- 通讯层 ----------
+        /// <summary>聊天消息频率异常（刷屏）。</summary>
+        ChatFlood,
+        /// <summary>聊天消息内容非法（空消息、超长、含控制字符）。</summary>
+        IllegalChat,
+        /// <summary>昵称非法（空、超长、含控制字符或标签）。</summary>
+        IllegalName,
+
+        // ---------- 角色动作层 ----------
+        /// <summary>不具备变形能力的角色执行了变形。</summary>
+        IllegalShapeshift,
+        /// <summary>不具备保护能力的角色执行了保护。</summary>
+        IllegalProtect,
+
+        // ---------- 通风管 / 滑索进阶 ----------
+        /// <summary>使用了不存在的通风管编号（伪造管道）。</summary>
+        VentForgedId,
+        /// <summary>会议期间使用通风管。</summary>
+        VentDuringMeeting,
+        /// <summary>非房主强制把他人踢出通风管。</summary>
+        VentForceOther,
+        /// <summary>滑索使用异常（非法时机或越界）。</summary>
+        ZiplineAbuse,
 
         // ---------- 网络层 ----------
         /// <summary>收到参数非法的 RPC 调用。</summary>
         InvalidRpc,
         /// <summary>客户端上报状态与服务端权威状态长期不一致。</summary>
         StateDesync,
+        /// <summary>收到异常大的数据包（可能意图拖垮房间）。</summary>
+        OversizedPacket,
     }
 
     /// <summary>

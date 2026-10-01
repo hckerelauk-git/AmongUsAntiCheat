@@ -98,7 +98,13 @@ namespace AmongUsAntiCheat.UI
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
-        [StructLayout(LayoutKind.Sequential, Size = 64)]
+        // ⚠️ 不要写死 Size。Win32 的 PAINTSTRUCT 尺寸随架构变化：
+        //      x86 = 64 字节，x64 = 72 字节（hdc 由 4 变 8 字节，再加 4 字节对齐填充）。
+        //    早期版本硬编码 Size=64，在 64 位进程里 BeginPaint 会越界写 8 字节，
+        //    踩坏栈上相邻数据 → 随机崩溃、绘制错乱。
+        //    现在按字段自然排布：尾部 8 个 int 正好 32 字节，等价于 rgbReserved[32]，
+        //    由 Marshal 在两种架构下各自推导出正确尺寸（x86=64 / x64=72）。
+        [StructLayout(LayoutKind.Sequential)]
         private struct PAINTSTRUCT
         {
             public IntPtr hdc;
@@ -106,8 +112,9 @@ namespace AmongUsAntiCheat.UI
             public RECT rcPaint;
             public int fRestore;
             public int fIncUpdate;
-            // 尾部 32 字节为系统保留区，用 Size=64 声明总长度即可，
-            // 不再用 fixed 数组（避免 Marshal 尺寸推断出错导致 hdc 无效）
+            // rgbReserved[32]：拆成 8 个 int，保证 blittable 且与架构无关
+            private int _reserved0, _reserved1, _reserved2, _reserved3;
+            private int _reserved4, _reserved5, _reserved6, _reserved7;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

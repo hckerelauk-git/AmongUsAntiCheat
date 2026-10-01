@@ -91,6 +91,26 @@ namespace AmongUsAntiCheat
             TryPatch(typeof(CompleteTaskPatch), "任务完成");
             TryPatch(typeof(VentEnterPatch), "通风管");
             TryPatch(typeof(SnapToPatch), "位置强制同步");
+
+            // ---------- 进阶检测（本次新增） ----------
+            // RPC 上下文必须先挂：UpdateSystem 这类方法签名里没有玩家信息，
+            // 只能靠它记录的发送者来归属证据。
+            TryPatch(typeof(RpcContextPatch), "RPC 上下文");
+
+            TryPatch(typeof(UpdateSystemPatch), "破坏系统");
+            TryPatch(typeof(ReportDeadBodyPatch), "报告尸体 / 早会");
+            TryPatch(typeof(SendChatPatch), "聊天");
+            TryPatch(typeof(SetNamePatch), "昵称");
+            TryPatch(typeof(ShapeshiftPatch), "变形");
+            TryPatch(typeof(ProtectPatch), "保护");
+            TryPatch(typeof(VentOpPatch), "通风管操作");
+            TryPatch(typeof(BootFromVentPatch), "强制踢出通风管");
+            TryPatch(typeof(ZiplinePatch), "滑索");
+            TryPatch(typeof(OversizedPacketPatch), "超大数据包");
+
+            // RPC 洪水防护：唯一的 Prefix 补丁——它是唯一能在 RPC 执行前
+            // 把包丢掉的一层，之前因为 TryPatch 只认 Postfix 而从未被挂载。
+            TryPatch(typeof(RpcFloodPatches), "RPC 洪水防护");
         }
 
         private void TryPatch(Type patchType, string label)
@@ -113,17 +133,27 @@ namespace AmongUsAntiCheat
                     return;
                 }
 
+                // Prefix 与 Postfix 都支持：Prefix 用于「拦截」（可返回 false 丢弃 RPC），
+                // Postfix 用于「观察」（事后记录证据）。至少要有其一。
+                var prefix = patchType.GetMethod("Prefix", Flags);
                 var postfix = patchType.GetMethod("Postfix", Flags);
-                if (postfix == null)
+
+                if (prefix == null && postfix == null)
                 {
-                    Log.LogWarning($"[补丁] {label}：补丁类未实现 Postfix，已跳过。");
+                    Log.LogWarning($"[补丁] {label}：补丁类既未实现 Prefix 也未实现 Postfix，已跳过。");
                     return;
                 }
 
-                _harmony.Patch(target, postfix: new HarmonyMethod(postfix));
+                _harmony.Patch(target,
+                    prefix: prefix != null ? new HarmonyMethod(prefix) : null,
+                    postfix: postfix != null ? new HarmonyMethod(postfix) : null);
+
+                var kind = prefix != null
+                    ? (postfix != null ? "Prefix+Postfix" : "Prefix")
+                    : "Postfix";
 
                 Log.LogInfo($"[补丁] {label} 已挂载 -> {target.DeclaringType?.Name}.{target.Name}"
-                          + $"({target.GetParameters().Length} 参数)");
+                          + $"({target.GetParameters().Length} 参数, {kind})");
             }
             catch (Exception ex)
             {

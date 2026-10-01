@@ -11,6 +11,13 @@ namespace AmongUsAntiCheat.Core
         public bool IsDead;
         public bool InVent;
         public bool IsImpostor;
+
+        /// <summary>角色是否被允许使用通风管（Role.CanVent）。Viper 为 true。</summary>
+        public bool CanVent;
+
+        /// <summary>上面那个 CanVent 是否取到了有效值。false 时不得据此判罚。</summary>
+        public bool RoleKnown;
+
         public bool CanMove;
         public bool InMeeting;
 
@@ -84,6 +91,18 @@ namespace AmongUsAntiCheat.Core
         /// <summary>本回合该玩家是否已经产生过任何高严重度证据。</summary>
         public bool FlaggedThisRound { get; set; }
 
+        /// <summary>聊天消息时间戳滑动窗口，用于刷屏判定。</summary>
+        public readonly Queue<float> ChatTimes = new Queue<float>(16);
+
+        /// <summary>上一次上报聊天刷屏的时刻，用于去重。</summary>
+        public float LastChatReportTime { get; set; } = float.NegativeInfinity;
+
+        /// <summary>上一次上报「非法动作」类证据的时刻，用于去重（按类型区分由调用方处理）。</summary>
+        public float LastActionReportTime { get; set; } = float.NegativeInfinity;
+
+        /// <summary>本回合首次被观测到是否已经处于对局中（用于早会判定的基准）。</summary>
+        public bool SeenInRound { get; set; }
+
         public PlayerTrack(int playerId, string name, float now)
         {
             PlayerId = playerId;
@@ -125,7 +144,11 @@ namespace AmongUsAntiCheat.Core
             LastKillTime = float.NegativeInfinity;
             LastTaskTime = float.NegativeInfinity;
             LastLegalTeleportTime = float.NegativeInfinity;
+            LastChatReportTime = float.NegativeInfinity;
+            LastActionReportTime = float.NegativeInfinity;
+            ChatTimes.Clear();
             FlaggedThisRound = false;
+            SeenInRound = false;
             History.Clear();
             Current = new PlayerSnapshot { Time = now };
             Previous = Current;
