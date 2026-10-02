@@ -19,3 +19,6 @@ Thumbs.db
 # 第三方参考产物（不随仓库分发）
 _ref_*.json
 _ref_*.dll
+
+# 从第三方 DLL 提取的参考资源（版权归原作者，不入库）
+_ref_amethyst_ui/
