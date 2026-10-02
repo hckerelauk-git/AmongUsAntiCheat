@@ -108,6 +108,12 @@ namespace AmongUsAntiCheat
             TryPatch(typeof(ZiplinePatch), "滑索");
             TryPatch(typeof(OversizedPacketPatch), "超大数据包");
 
+            // ---------- 界面 ----------
+            // 主菜单背景替换：Start 首次应用，Update 低频巡检补刀
+            // （游戏切场景会重建背景对象，只挂 Start 会还原）。
+            TryPatch(typeof(MainMenuArtStartPatch), "主菜单背景(Start)");
+            TryPatch(typeof(MainMenuArtUpdatePatch), "主菜单背景(Update)");
+
             // RPC 洪水防护：唯一的 Prefix 补丁——它是唯一能在 RPC 执行前
             // 把包丢掉的一层，之前因为 TryPatch 只认 Postfix 而从未被挂载。
             TryPatch(typeof(RpcFloodPatches), "RPC 洪水防护");

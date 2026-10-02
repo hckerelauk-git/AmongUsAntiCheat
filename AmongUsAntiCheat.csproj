@@ -153,6 +153,22 @@
       <HintPath>$(BepInExUnityLibs)\UnityEngine.AudioModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- 解码内嵌的主菜单背景图（JPG → Texture2D）需要它 -->
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- ================= 内嵌资源 ================= -->
+  <ItemGroup>
+    <!--
+      主菜单背景图。用 EmbeddedResource 而不是外部文件，
+      保证「一个 dll 就是完整插件」——用户不用额外拷贝图片。
+      LogicalName 显式指定，避免受 RootNamespace / 目录结构变化影响。
+    -->
+    <EmbeddedResource Include="src\Resources\MainMenuArt.jpg"
+                      LogicalName="AmongUsAntiCheat.MainMenuArt.jpg" />
   </ItemGroup>
 
   <!-- ================= 编译后自动部署 ================= -->

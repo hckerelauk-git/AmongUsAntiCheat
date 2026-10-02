@@ -103,6 +103,9 @@ namespace AmongUsAntiCheat.Config
         public readonly ConfigEntry<bool> ShowNotifications;
         public readonly ConfigEntry<float> NotificationDuration;
 
+        /// <summary>把主菜单背景换成内置插画。</summary>
+        public readonly ConfigEntry<bool> ShowMainMenuArt;
+
         // ================= 爬管道 / 滑索 =================
 
         public readonly ConfigEntry<bool> VentNonImpostor;
@@ -300,6 +303,9 @@ namespace AmongUsAntiCheat.Config
                 new ConfigDescription(
                     "通知自动消失的时间。",
                     new AcceptableValueRange<float>(1f, 20f)));
+            ShowMainMenuArt = cfg.Bind(F, "自定义主菜单背景", true,
+                "把主菜单背景换成内置的插画。" + NL +
+                "图片已经打包进插件里了，不需要你额外放文件。");
 
             // ---------------- 爬管道 / 滑索 ----------------
             const string G = "爬管道和滑索";
