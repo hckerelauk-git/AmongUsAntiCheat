@@ -10,28 +10,32 @@ namespace AmongUsAntiCheat.UI
     /// </summary>
     internal static class AceTheme
     {
-        // ================= 配色（深蓝科技感） =================
+        // ================= 配色（深空 + 青色，与桌面启动动画同一套视觉） =================
+        //
+        // 改版说明：原配色是「企业蓝」（#2E9BFF 主色 + #1E6FD9 描边），
+        // 和桌面启动动画的青色卡片放在一起像两个产品。
+        // 现在统一到「深空底 + 青色强调」，整套 UI（桌面动画 / 面板 / 通知 / 设置）同源。
 
-        /// <summary>窗口底色。</summary>
-        public static readonly Color WindowBg = new Color32(0x08, 0x12, 0x1E, 0xF0);
+        /// <summary>窗口底色（深空蓝黑）。</summary>
+        public static readonly Color WindowBg = new Color32(0x0A, 0x10, 0x18, 0xF0);
 
         /// <summary>面板底色。</summary>
-        public static readonly Color PanelBg = new Color32(0x0E, 0x1C, 0x2B, 0xE8);
+        public static readonly Color PanelBg = new Color32(0x12, 0x1C, 0x2E, 0xE8);
 
-        /// <summary>主边框蓝。</summary>
-        public static readonly Color Border = new Color32(0x1E, 0x6F, 0xD9, 0xFF);
+        /// <summary>描边（低饱和，只做边界不抢视线）。</summary>
+        public static readonly Color Border = new Color32(0x1E, 0x3A, 0x5F, 0xFF);
 
-        /// <summary>主色。</summary>
-        public static readonly Color Primary = new Color32(0x2E, 0x9B, 0xFF, 0xFF);
+        /// <summary>主色（青）。</summary>
+        public static readonly Color Primary = new Color32(0x2E, 0xE6, 0xD6, 0xFF);
 
-        /// <summary>强调青。</summary>
-        public static readonly Color Accent = new Color32(0x00, 0xD9, 0xFF, 0xFF);
+        /// <summary>强调色（亮青，用于标题与高亮）。</summary>
+        public static readonly Color Accent = new Color32(0x5A, 0xF0, 0xE0, 0xFF);
 
         /// <summary>主文字。</summary>
-        public static readonly Color TextMain = new Color32(0xE6, 0xF1, 0xFF, 0xFF);
+        public static readonly Color TextMain = new Color32(0xE8, 0xF2, 0xFF, 0xFF);
 
         /// <summary>次要文字。</summary>
-        public static readonly Color TextDim = new Color32(0x7A, 0x93, 0xAD, 0xFF);
+        public static readonly Color TextDim = new Color32(0x7A, 0x8F, 0xA8, 0xFF);
 
         /// <summary>安全 / 正常。</summary>
         public static readonly Color Success = new Color32(0x3D, 0xD6, 0x8C, 0xFF);
@@ -43,7 +47,7 @@ namespace AmongUsAntiCheat.UI
         public static readonly Color Warning = new Color32(0xFF, 0xB0, 0x2E, 0xFF);
 
         /// <summary>进度条底槽。</summary>
-        public static readonly Color Track = new Color32(0x14, 0x28, 0x3C, 0xFF);
+        public static readonly Color Track = new Color32(0x14, 0x2E, 0x4A, 0xFF);
 
         // ================= 纹理生成 =================
 
