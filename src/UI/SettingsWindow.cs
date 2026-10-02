@@ -422,7 +422,7 @@ namespace AmongUsAntiCheat.UI
                     list.Add(Toggle("顶部弹出提醒", cfg.ShowNotifications,
                         "命中检测规则时在屏幕上方弹一条通知。"));
                     list.Add(Toggle("开机启动动画", cfg.ShowDesktopSplash,
-                        "进游戏时在桌面右下角弹一下 ACE 的加载动画。"));
+                        "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
                     list.Add(Toggle("输出详细日志", cfg.VerboseLogging,
                         "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
                     break;
@@ -530,7 +530,9 @@ namespace AmongUsAntiCheat.UI
                     break;
 
                 default:
-                    list.Add(Info("插件名称", "Apex Cheat Ender，简称 ACE。", () => "1.1.0"));
+                    // 版本号直接取常量，避免与 csproj 的 <Version> 各写各的（曾因此对不上）
+                    list.Add(Info("插件名称", "Apex Cheat Ender",
+                        () => AntiCheatPlugin.PluginVersion));
                     list.Add(Info("快捷键", "Insert 打开这个界面，F8 开关右上角监控面板。", () => ""));
                     list.Add(Info("改配置要不要重启", "不用。用记事本改完保存，游戏里几秒内自动生效。", () => ""));
                     list.Add(Info("配置文件在哪", "BepInEx/config/apex.cheat.ender.cfg", () => ""));

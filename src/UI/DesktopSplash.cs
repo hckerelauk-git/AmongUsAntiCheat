@@ -5,13 +5,14 @@ using System.Threading;
 namespace AmongUsAntiCheat.UI
 {
     /// <summary>
-    /// 桌面右下角启动画面（复刻腾讯 ACE 反作弊启动样式）。
+    /// 桌面右下角启动画面。
     ///
-    /// 视觉参照 ACE 实际启动画面：
-    ///   - 蓝色横向渐变底（左深右亮）+ 斜线科技纹理
-    ///   - 左侧 ACE 艺术字标志（白色带投影）
-    ///   - 右侧主标题「ACE反作弊引擎」
-    ///   - 下方白色警示语「感谢使用 ACE，作弊者将被标记」
+    /// 当前视觉（2026-10 改版，不再是最初的蓝色渐变方案）：
+    ///   - 14px 圆角卡片（SetWindowRgn 真裁窗口，不是画个假的）
+    ///   - 深空竖向渐变底 #0A1018 → #141F33 + 1px 描边
+    ///   - 左侧青色盾牌徽标（圆角方块底衬 + Polygon 画的盾牌）
+    ///   - 右侧主标题「Apex Cheat Ender」+ 副标题
+    ///   - 底部内缩圆角进度条（青色填充 + 暗色轨道）
     ///
     /// 实现方式：纯 P/Invoke 调 Win32（user32 + gdi32）自建窗口，
     /// 不依赖 WinForms / WPF —— 游戏进程跑在 CoreCLR 上，
@@ -361,7 +362,7 @@ namespace AmongUsAntiCheat.UI
                 _hwnd = CreateWindowEx(
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
                     "ApexCheatEnderSplash",
-                    "ACE 反作弊引擎",
+                    "Apex Cheat Ender",
                     WS_POPUP,
                     x, y, WindowWidth, WindowHeight,
                     IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
@@ -605,7 +606,7 @@ namespace AmongUsAntiCheat.UI
                 Right = WindowWidth - PadX,
                 Bottom = BadgeTop + 25,
             };
-            DrawText(hdc, "ACE 反作弊引擎", -1, ref titleRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+            DrawText(hdc, "Apex Cheat Ender", -1, ref titleRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
 
             SelectObject(hdc, _fontSub);
             SetTextColor(hdc, ColorTextDim);
@@ -616,7 +617,7 @@ namespace AmongUsAntiCheat.UI
                 Right = WindowWidth - PadX,
                 Bottom = BadgeTop + 44,
             };
-            DrawText(hdc, "Apex Cheat Ender · 正在启动防护", -1, ref subRect,
+            DrawText(hdc, "Among Us 客户端反作弊 · 正在启动防护", -1, ref subRect,
                      DT_LEFT | DT_SINGLELINE | DT_VCENTER);
         }
 

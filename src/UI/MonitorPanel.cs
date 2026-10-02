@@ -7,7 +7,7 @@ using UnityEngine.UI;
 namespace AmongUsAntiCheat.UI
 {
     /// <summary>
-    /// ACE 监控面板：常驻屏幕右上角，显示防护状态与规则命中排行。
+    /// Apex Cheat Ender 监控面板：常驻屏幕右上角，显示防护状态与规则命中排行。
     ///
     /// 布局：
     ///   ┌──────────────────────────────┐

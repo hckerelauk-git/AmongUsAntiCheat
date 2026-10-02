@@ -296,7 +296,7 @@ namespace AmongUsAntiCheat.Config
             ShowOverlay = cfg.Bind(F, "显示右上角监控面板", true,
                 "一直显示防护状态和规则命中排行。游戏中按 F8 可以临时关掉。");
             ShowDesktopSplash = cfg.Bind(F, "显示开机启动动画", true,
-                "进游戏时在桌面右下角弹一下 ACE 的加载动画。");
+                "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。");
             ShowNotifications = cfg.Bind(F, "屏幕顶部弹出提醒", true,
                 "命中检测规则时在屏幕上方弹一条通知。");
             NotificationDuration = cfg.Bind(F, "提醒停留几秒", 5f,
