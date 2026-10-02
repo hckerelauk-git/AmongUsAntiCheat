@@ -60,9 +60,29 @@ namespace ApexCheatEnder.UI
         /// <summary>页签选中态底色。</summary>
         public static readonly Color TabActiveBg = new Color32(0x2E, 0xE6, 0xD6, 0x24);
 
-        /// <summary>设置行底板（两种交替，制造斑马纹便于横向读行）。</summary>
-        public static readonly Color RowBgA = new Color32(0x14, 0x20, 0x33, 0xC4);
-        public static readonly Color RowBgB = new Color32(0x10, 0x1A, 0x2B, 0xC4);
+        /// <summary>
+        /// 设置行底板（两种交替，制造斑马纹便于横向读行）。
+        ///
+        /// 这两色必须明显亮于 WindowBg(0A1018)，否则行会整体融进窗口背景、
+        /// 看不出「一行」的边界。旧值是 142033 / 101A2B，与窗口底色差不到
+        /// 一档，截图上行与行糊成一片，故整体提亮并拉开两色差距。
+        /// </summary>
+        public static readonly Color RowBgA = new Color32(0x1E, 0x2E, 0x48, 0xD2);
+        public static readonly Color RowBgB = new Color32(0x18, 0x25, 0x3C, 0xD2);
+
+        /// <summary>设置行的描边。比 Border 亮一档，让圆角行的轮廓能浮出底纹。</summary>
+        public static readonly Color RowBorder = new Color32(0x2C, 0x4A, 0x72, 0xFF);
+
+        // ================= 开关控件 =================
+
+        /// <summary>开关轨道底色（关）。</summary>
+        public static readonly Color SwitchOff = new Color32(0x24, 0x32, 0x48, 0xFF);
+
+        /// <summary>开关轨道底色（开）。</summary>
+        public static readonly Color SwitchOn = new Color32(0x2E, 0xE6, 0xD6, 0xFF);
+
+        /// <summary>开关滑块颜色。</summary>
+        public static readonly Color SwitchKnob = new Color32(0xF0, 0xF6, 0xFF, 0xFF);
 
         /// <summary>数字行的「−」按钮底色（暗色，表示减弱）。</summary>
         public static readonly Color BtnMinusBg = new Color32(0x1E, 0x3A, 0x5F, 0xE0);
@@ -197,6 +217,61 @@ namespace ApexCheatEnder.UI
         private static string ColorKey(Color c) =>
             ((int)(c.r * 255)).ToString() + "," + ((int)(c.g * 255)).ToString() + "," +
             ((int)(c.b * 255)).ToString() + "," + ((int)(c.a * 255)).ToString();
+
+        /// <summary>
+        /// 生成正圆形 Sprite（开关滑块用）。
+        ///
+        /// 为什么不能复用 MakeCard：它的贴图边长固定为 radius*2+8，
+        /// 圆角半径永远比半宽小 4，四角拼不出正圆 —— 拉出来是个圆角方块。
+        /// 开关滑块在轨道里滑动时，圆角方块的棱角一眼就能看出来。
+        /// </summary>
+        public static Sprite MakeDot(int diameter, Color color)
+        {
+            if (diameter < 4) diameter = 4;
+
+            var tex = new Texture2D(diameter, diameter, TextureFormat.RGBA32, false);
+            var pixels = new Color[diameter * diameter];
+            var transparent = new Color(0f, 0f, 0f, 0f);
+            var r = diameter / 2f;
+            var r2 = r * r;
+
+            for (var y = 0; y < diameter; y++)
+            {
+                for (var x = 0; x < diameter; x++)
+                {
+                    var dx = x + 0.5f - r;
+                    var dy = y + 0.5f - r;
+                    pixels[y * diameter + x] = dx * dx + dy * dy <= r2 ? color : transparent;
+                }
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            return Sprite.Create(
+                tex,
+                new Rect(0f, 0f, diameter, diameter),
+                new Vector2(0.5f, 0.5f),
+                100f,
+                0,
+                SpriteMeshType.FullRect);
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<string, Sprite> DotCache
+            = new System.Collections.Generic.Dictionary<string, Sprite>();
+
+        /// <summary>带缓存的 MakeDot。</summary>
+        public static Sprite Dot(int diameter, Color color)
+        {
+            var key = diameter + "|" + ColorKey(color);
+            if (DotCache.TryGetValue(key, out var cached) && cached != null) return cached;
+
+            var sprite = MakeDot(diameter, color);
+            DotCache[key] = sprite;
+            return sprite;
+        }
 
         /// <summary>
         /// 程序生成盾牌图标。

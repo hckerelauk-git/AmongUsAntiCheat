@@ -205,7 +205,9 @@ namespace ApexCheatEnder.UI
             // 等反作弊初始化完成后再出现
             var ready = AntiCheatRuntime.IsReady && (Time.time - _firstTickTime >= ShowDelaySeconds);
 
-            var shouldShow = ready && _visible;
+            // 设置窗口打开时让位：它占着屏幕中央，而本面板常驻右上角，
+            // 两者会叠在标题栏上互相遮挡。
+            var shouldShow = ready && _visible && !SettingsWindow.IsOpen;
             if (_root.activeSelf != shouldShow) _root.SetActive(shouldShow);
             if (!shouldShow) return;
 

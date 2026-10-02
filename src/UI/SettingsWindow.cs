@@ -30,8 +30,19 @@ namespace ApexCheatEnder.UI
         private const float TitleBarHeight = 64f;
         private const float TabColumnWidth = 220f;
         private const float FooterHeight = 46f;
-        private const float RowHeight = 58f;
+        /// <summary>
+        /// 单行高度。一行要放下「标题 + 说明」两段文字，58px 太挤：
+        /// 标题 20px 紧贴说明 18px，再叠上不同分辨率下的字体缩放就会出现
+        /// 视觉重叠。放宽到 74px，两段文字之间留出明显间隙。
+        /// </summary>
+        private const float RowHeight = 74f;
         private const float ContentPadding = 28f;
+
+        // ================= 开关控件尺寸 =================
+        // 轨道 52×26，滑块直径 20，左右各留 3px 内边距。
+        // 滑块的 x 用它中心到轨道左边缘的距离表示（anchoredPosition.x）。
+        private const float SwitchKnobOffX = 13f;   // 3 + 20/2
+        private const float SwitchKnobOnX = 39f;    // 52 - 3 - 20/2
 
         /// <summary>窗口圆角半径（与监控面板同一套 9 宫格卡片）。</summary>
         private const int WindowRadius = 16;
@@ -108,6 +119,12 @@ namespace ApexCheatEnder.UI
             public Text Value;
             public RectTransform MinusRect;
             public RectTransform PlusRect;
+
+            /// <summary>开关行的轨道底板（仅 Toggle 行有）。</summary>
+            public Image SwitchTrack;
+
+            /// <summary>开关行的滑块（仅 Toggle 行有）。移动它来表达开/关。</summary>
+            public RectTransform SwitchKnob;
         }
 
         // ================= 行模型 =================
@@ -120,6 +137,14 @@ namespace ApexCheatEnder.UI
             public string Hint;
             public RowKind Kind;
             public Func<string> GetValue;
+
+            /// <summary>
+            /// 开关行的当前状态（仅 Toggle 行提供）。
+            /// 之前靠解析 GetValue() 返回的 "[ 开 ]" 字符串来判断颜色与位置 ——
+            /// 靠中文字符猜状态，改一句文案就会错。改由这里直接给布尔值。
+            /// </summary>
+            public Func<bool> GetState;
+
             public Action OnToggle;
             public Action OnMinus;
             public Action OnPlus;
@@ -168,12 +193,15 @@ namespace ApexCheatEnder.UI
             bg.type = Image.Type.Sliced;
             UiBuilder.Stretch(bg.rectTransform, 0f, 0f, 0f, 0f);
 
-            // ---- 顶部强调条：内缩圆角条 ----
+            // ---- 顶部强调条 ----
+            // 原先是横贯整个窗口宽度的亮青色条（1060×3），在一块深色卡片上
+            // 非常抢眼，把注意力从内容上抢走了。改成只覆盖标题区宽度的一小段，
+            // 当「标题下的点睛线」用 —— 有设计感，但不喧宾夺主。
             var topBar = UiBuilder.CreateImage("TopBar", _root.transform, AceTheme.Primary);
             topBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
             topBar.type = Image.Type.Sliced;
             UiBuilder.Place(topBar.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(10f, -10f), new Vector2(WindowWidth - 20f, 3f));
+                new Vector2(18f, -14f), new Vector2(132f, 2f));
 
             var shieldTex = AceTheme.MakeShield(48, AceTheme.Primary, AceTheme.Accent);
             var shield = UiBuilder.CreateImage("Shield", _root.transform, Color.white, shieldTex);
@@ -185,8 +213,10 @@ namespace ApexCheatEnder.UI
             UiBuilder.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(62f, -17f), new Vector2(320f, 26f));
 
+            // 这句是普通说明，不是「操作成功」的状态提示，用绿色（Success）会
+            // 让人以为刚刚发生了什么。改用次要文字色。
             var subtitle = UiBuilder.CreateText("SubTitle", _root.transform,
-                "改动立刻生效，不用重启游戏", font, 11, AceTheme.Success);
+                "改动立刻生效，不用重启游戏", font, 11, AceTheme.TextDim);
             UiBuilder.Place(subtitle.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(250f, -20f), new Vector2(340f, 20f));
 
@@ -366,19 +396,21 @@ namespace ApexCheatEnder.UI
                 var bg = node.AddComponent<Image>();
                 bg.sprite = AceTheme.Card(RowRadius, 1,
                     i % 2 == 0 ? AceTheme.RowBgA : AceTheme.RowBgB,
-                    AceTheme.Border);
+                    AceTheme.RowBorder);
                 bg.type = Image.Type.Sliced;
                 bg.raycastTarget = false;
 
+                // 标题与说明之间留 4px 间隙：说明字号更小、颜色更暗，
+                // 靠「字号 + 灰度 + 间距」三重区分层级，不再靠挤在一起
                 var label = UiBuilder.CreateText("RowLabel" + i, node.transform,
                     row.Label, font, 13, AceTheme.TextMain, TextAnchor.UpperLeft);
                 UiBuilder.Place(label.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(14f, -6f), new Vector2(420f, 20f));
+                    new Vector2(16f, -10f), new Vector2(460f, 22f));
 
                 var hint = UiBuilder.CreateText("RowHint" + i, node.transform,
                     row.Hint ?? string.Empty, font, 11, AceTheme.TextDim, TextAnchor.UpperLeft);
                 UiBuilder.Place(hint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(14f, -26f), new Vector2(contentWidth - 28f, 18f));
+                    new Vector2(16f, -36f), new Vector2(contentWidth - 32f, 20f));
 
                 if (row.Kind == RowKind.TextField)
                 {
@@ -438,6 +470,43 @@ namespace ApexCheatEnder.UI
                     continue;
                 }
 
+                // 开关行：画一个真正的开关（轨道 + 滑块），不再用 "[ 开 ]" 这种
+                // 方括号文本 —— 那是调试输出的样子，不是成品 UI。
+                if (row.Kind == RowKind.Toggle && row.GetState != null)
+                {
+                    var swNode = UiBuilder.CreateNode("Switch", node.transform);
+                    var swRect = swNode.GetComponent<RectTransform>();
+                    UiBuilder.Place(swRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                        new Vector2(-18f, 0f), new Vector2(52f, 26f));
+
+                    // 贴图一律用白色，状态色交给 Image.color。
+                    // 若把底色烤进贴图，Image.color 会与之相乘：
+                    // SwitchOff × SwitchOn ≈ 黑，开关就废了。
+                    var track = swNode.AddComponent<Image>();
+                    track.sprite = AceTheme.Card(12, 0, Color.white, Color.white);
+                    track.type = Image.Type.Sliced;
+                    track.raycastTarget = false;
+
+                    var knobNode = UiBuilder.CreateNode("Knob", swNode.transform);
+                    var knobRect = knobNode.GetComponent<RectTransform>();
+                    UiBuilder.Place(knobRect, new Vector2(0f, 0.5f), new Vector2(0.5f, 0.5f),
+                        new Vector2(SwitchKnobOffX, 0f), new Vector2(20f, 20f));
+                    var knob = knobNode.AddComponent<Image>();
+                    knob.sprite = AceTheme.Dot(20, Color.white);
+                    knob.color = AceTheme.SwitchKnob;
+                    knob.raycastTarget = false;
+
+                    Rows.Add(new RowEntry
+                    {
+                        Model = row,
+                        Rect = rect,
+                        Background = bg,
+                        SwitchTrack = track,
+                        SwitchKnob = knobRect,
+                    });
+                    continue;
+                }
+
                 var normalValue = UiBuilder.CreateText("RowValue" + i, node.transform,
                     "", font, 13, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
                 UiBuilder.Place(normalValue.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
@@ -458,14 +527,36 @@ namespace ApexCheatEnder.UI
         {
             foreach (var row in Rows)
             {
+                // 开关行：直接读布尔状态上色与定位。
+                //
+                // 原先是解析 GetValue() 返回的 "[ 开 ]" / "[ 关 ]" 字符串，
+                // 靠 text.Contains("开") 判断颜色 —— 靠中文字符猜状态：
+                // 任何含「开」字的文案（如「开局后几秒内不许开会」）都会让它变绿。
+                // 现在开关行不再产生文本，改由 GetState() 直接给状态。
+                if (row.SwitchTrack != null)
+                {
+                    var on = row.Model.GetState != null && row.Model.GetState();
+                    row.SwitchTrack.color = on ? AceTheme.SwitchOn : AceTheme.SwitchOff;
+
+                    if (row.SwitchKnob != null)
+                    {
+                        var target = on ? SwitchKnobOnX : SwitchKnobOffX;
+                        // 滑块滑动做插值，切换时有过渡而不是瞬移
+                        var p = row.SwitchKnob.anchoredPosition;
+                        p.x = Mathf.Lerp(p.x, target, 0.35f);
+                        row.SwitchKnob.anchoredPosition = p;
+                    }
+                    continue;
+                }
+
                 if (row.Model.GetValue == null || row.Value == null) continue;
                 var text = row.Model.GetValue();
                 row.Value.text = text;
-                row.Value.color = text.Contains("开") || text.Contains("已")
-                    ? AceTheme.Success
-                    : text.Contains("关")
-                        ? AceTheme.TextDim
-                        : AceTheme.Accent;
+
+                // 非开关行按「这一行的性质」上色，不再靠文案里的字眼猜。
+                row.Value.color = row.Model.Kind == RowKind.Info
+                    ? AceTheme.TextDim
+                    : AceTheme.Accent;
             }
         }
 
@@ -660,7 +751,7 @@ namespace ApexCheatEnder.UI
                 Label = label,
                 Hint = hint,
                 Kind = RowKind.Toggle,
-                GetValue = () => entry.Value ? "[ 开 ]" : "[ 关 ]",
+                GetState = () => entry.Value,
                 OnToggle = () =>
                 {
                     entry.Value = !entry.Value;
@@ -853,6 +944,13 @@ namespace ApexCheatEnder.UI
         // ================= 交互 =================
 
         /// <summary>每帧调用。</summary>
+        /// <summary>
+        /// 设置界面当前是否打开。
+        /// 监控面板常驻右上角，正好压在设置窗口的标题栏上 —— 屏幕就那么大，
+        /// 两个面板叠在一起谁都看不清。由监控面板读这个标志来让位。
+        /// </summary>
+        public static bool IsOpen => _visible;
+
         public static void Tick(bool toggleRequested)
         {
             if (!_built || _root == null) return;
