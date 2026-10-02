@@ -44,6 +44,11 @@ namespace ApexCheatEnder.UI
         private const float SwitchKnobOffX = 13f;   // 3 + 20/2
         private const float SwitchKnobOnX = 39f;    // 52 - 3 - 20/2
 
+        // ================= 侧边栏尺寸 =================
+        // 页签 44 高、间隔 52：留 8px 空隙，比原来 42/48 更透气。
+        private const float TabHeight = 44f;
+        private const float TabSpacing = 52f;
+
         /// <summary>窗口圆角半径（与监控面板同一套 9 宫格卡片）。</summary>
         private const int WindowRadius = 16;
 
@@ -108,6 +113,7 @@ namespace ApexCheatEnder.UI
             public RectTransform Rect;
             public Image Background;
             public Image Marker;
+            public Image Glyph;
             public Text Label;
         }
 
@@ -160,6 +166,21 @@ namespace ApexCheatEnder.UI
             "爬管道",
             "AI 帮忙看",
             "关于",
+        };
+
+        /// <summary>
+        /// 每个页签的图标形状，与 <see cref="TabNames"/> 一一对应。
+        /// 用形状而不是内置图片：插件要保证「一个 dll 就是完整插件」，
+        /// 且这些几何图形由 <c>AceTheme.Glyph</c> 程序生成，任意尺寸都清晰。
+        /// </summary>
+        private static readonly AceTheme.GlyphShape[] TabGlyphs =
+        {
+            AceTheme.GlyphShape.Square,     // 开着什么：开关方块
+            AceTheme.GlyphShape.Triangle,   // 跑多快算作弊：速度
+            AceTheme.GlyphShape.Diamond,    // 抓到怎么办：处置
+            AceTheme.GlyphShape.Circle,     // 爬管道：管道口
+            AceTheme.GlyphShape.Ring,       // AI 帮忙看：智能
+            AceTheme.GlyphShape.Bars,       // 关于：条目
         };
 
         private static readonly string[] TabHints =
@@ -304,23 +325,34 @@ namespace ApexCheatEnder.UI
                 var node = UiBuilder.CreateNode("Tab" + i, _contentArea.parent);
                 var rect = node.GetComponent<RectTransform>();
                 UiBuilder.Place(rect, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(14f, -TitleBarHeight - 18f - i * 48f),
-                    new Vector2(TabColumnWidth - 28f, 42f));
+                    new Vector2(14f, -TitleBarHeight - 20f - i * TabSpacing),
+                    new Vector2(TabColumnWidth - 28f, TabHeight));
 
                 var bg = node.AddComponent<Image>();
-                bg.sprite = AceTheme.Card(8, 0, Color.white, Color.white);
+                bg.sprite = AceTheme.Card(9, 0, Color.white, Color.white);
                 bg.type = Image.Type.Sliced;
                 bg.color = new Color(0f, 0f, 0f, 0f);   // 未选中时全透明
                 bg.raycastTarget = false;
 
+                // 选中标记：贴左侧的圆角短竖条。
+                // 原来是 4×42 顶满行高的实心长条，太粗太满；改成 3×26 并留出上下留白。
                 var marker = UiBuilder.CreateImage("Marker" + i, node.transform, AceTheme.Accent);
+                marker.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
+                marker.type = Image.Type.Sliced;
                 UiBuilder.Place(marker.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    Vector2.zero, new Vector2(4f, 42f));
+                    Vector2.zero, new Vector2(3f, 26f));
+
+                // 图标：白色贴图 + Image.color 上色。
+                // 贴图若带颜色，Image.color 会与之相乘，切换选中态时会变色失真。
+                var glyph = UiBuilder.CreateImage("Glyph" + i, node.transform,
+                    AceTheme.TextDim, AceTheme.Glyph(TabGlyphs[i], 18, Color.white));
+                UiBuilder.Place(glyph.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(20f, 0f), new Vector2(18f, 18f));
 
                 var label = UiBuilder.CreateText("TabLabel" + i, node.transform,
                     TabNames[i], font, 13, AceTheme.TextDim, TextAnchor.MiddleLeft);
                 UiBuilder.Place(label.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    new Vector2(22f, 0f), new Vector2(TabColumnWidth - 54f, 28f));
+                    new Vector2(48f, 0f), new Vector2(TabColumnWidth - 78f, 26f));
 
                 Tabs.Add(new TabEntry
                 {
@@ -328,6 +360,7 @@ namespace ApexCheatEnder.UI
                     Rect = rect,
                     Background = bg,
                     Marker = marker,
+                    Glyph = glyph,
                     Label = label,
                 });
             }
@@ -344,13 +377,20 @@ namespace ApexCheatEnder.UI
             for (var i = 0; i < Tabs.Count; i++)
             {
                 var selected = i == index;
+
                 Tabs[i].Label.color = selected ? AceTheme.TextMain : AceTheme.TextDim;
+                // 选中态加粗：只靠颜色区分在深色底上不够明显
+                Tabs[i].Label.fontStyle = selected ? FontStyle.Bold : FontStyle.Normal;
+
                 Tabs[i].Background.color = selected
                     ? AceTheme.TabActiveBg
                     : new Color(0f, 0f, 0f, 0f);
 
                 if (Tabs[i].Marker != null)
                     Tabs[i].Marker.color = selected ? AceTheme.Accent : new Color(0f, 0f, 0f, 0f);
+
+                if (Tabs[i].Glyph != null)
+                    Tabs[i].Glyph.color = selected ? AceTheme.Primary : AceTheme.TextDim;
             }
 
             BuildRows(index);
@@ -607,6 +647,27 @@ namespace ApexCheatEnder.UI
                 "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
             list.Add(Toggle("自定义主菜单背景", cfg.ShowMainMenuArt,
                 "把主菜单背景换成内置插画。图片已打包进插件，不需要额外文件。"));
+            list.Add(Toggle("标记同装 ACE 的玩家", cfg.AcePresenceEnabled,
+                "跟同样装了 Apex Cheat Ender 的人互相认一下，在对方名字上加个标记。"));
+            list.Add(new SettingRow
+            {
+                Label = "标记写成什么",
+                Hint = "显示在对方名字后面的文字。默认带表情符号；"
+                     + "游戏里若显示成方块，改成纯文字（比如 [ACE]）即可。",
+                Kind = RowKind.TextField,
+                GetValue = () => string.IsNullOrEmpty(cfg.AcePresenceTag.Value)
+                    ? "（默认）"
+                    : "已自定义",
+                GetText = () => cfg.AcePresenceTag.Value ?? string.Empty,
+                SetText = v =>
+                {
+                    cfg.AcePresenceTag.Value = string.IsNullOrEmpty(v)
+                        ? Core.AcePresence.DefaultTag
+                        : v;
+                    FlashSaved();
+                    AntiCheatRuntime.ApplyConfigChange();
+                },
+            });
             list.Add(Toggle("输出详细日志", cfg.VerboseLogging,
                 "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
             return list;

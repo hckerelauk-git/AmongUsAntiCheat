@@ -158,6 +158,19 @@
       <HintPath>$(BepInExUnityLibs)\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!--
+      发送自定义 RPC 需要 MessageWriter / MessageReader / SendOption。
+      它们属于 Hazel（游戏的网络层），不在 Assembly-CSharp 里。
+    -->
+    <Reference Include="Hazel">
+      <HintPath>$(BepInExInterop)\Hazel.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- 玩家头顶的名字是 TMP_Text（TextMeshPro），不是旧版 UnityEngine.UI.Text -->
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(BepInExInterop)\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- ================= 内嵌资源 ================= -->

@@ -117,6 +117,10 @@ namespace ApexCheatEnder
             // RPC 洪水防护：唯一的 Prefix 补丁——它是唯一能在 RPC 执行前
             // 把包丢掉的一层，之前因为 TryPatch 只认 Postfix 而从未被挂载。
             TryPatch(typeof(RpcFloodPatches), "RPC 洪水防护");
+
+            // ACE 客户端互认：认出房间里同样装了本插件的人，并在其名字上加标记
+            TryPatch(typeof(AcePresenceRpcPatch), "ACE 互认(握手)");
+            TryPatch(typeof(AcePresenceNamePatch), "ACE 互认(名字标记)");
         }
 
         private void TryPatch(Type patchType, string label)

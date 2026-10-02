@@ -273,6 +273,123 @@ namespace ApexCheatEnder.UI
             return sprite;
         }
 
+        // ================= 侧边栏图标 =================
+
+        /// <summary>侧边栏用的基础几何形状。</summary>
+        public enum GlyphShape
+        {
+            /// <summary>圆角方块。</summary>
+            Square,
+            /// <summary>正圆。</summary>
+            Circle,
+            /// <summary>圆环。</summary>
+            Ring,
+            /// <summary>菱形。</summary>
+            Diamond,
+            /// <summary>向上的三角形。</summary>
+            Triangle,
+            /// <summary>三条横线（列表 / 信息）。</summary>
+            Bars,
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<string, Texture2D> GlyphCache
+            = new System.Collections.Generic.Dictionary<string, Texture2D>();
+
+        /// <summary>
+        /// 带缓存的几何图标。
+        /// 返回 Texture2D（而非 Sprite）：图标是固定尺寸的实心图形，
+        /// 不需要 9 宫格拉伸，直接给 Image 当贴图用最省事。
+        /// </summary>
+        public static Texture2D Glyph(GlyphShape shape, int size, Color color)
+        {
+            var key = shape + "|" + size + "|" + ColorKey(color);
+            if (GlyphCache.TryGetValue(key, out var cached) && cached != null) return cached;
+
+            var tex = MakeGlyph(shape, size, color);
+            GlyphCache[key] = tex;
+            return tex;
+        }
+
+        /// <summary>
+        /// 程序生成几何图标。
+        ///
+        /// 为什么不内置 png：插件的卖点是「丢一个 dll 就能用」，
+        /// 每多一张图就多一份体积与打包风险。这几款形状用几行像素判定就能画出来，
+        /// 且任意尺寸都清晰（矢量式生成，没有位图缩放糊边的问题）。
+        /// </summary>
+        private static Texture2D MakeGlyph(GlyphShape shape, int size, Color color)
+        {
+            if (size < 8) size = 8;
+
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            var pixels = new Color[size * size];
+            var clear = new Color(0f, 0f, 0f, 0f);
+            var c = size / 2f;
+            var r = c * 0.92f;
+
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var px = x + 0.5f;
+                    var py = y + 0.5f;
+                    var dx = px - c;
+                    var dy = py - c;
+                    bool on;
+
+                    switch (shape)
+                    {
+                        case GlyphShape.Circle:
+                            on = dx * dx + dy * dy <= r * r;
+                            break;
+
+                        case GlyphShape.Ring:
+                            var d2 = dx * dx + dy * dy;
+                            var inner = r * 0.58f;
+                            on = d2 <= r * r && d2 >= inner * inner;
+                            break;
+
+                        case GlyphShape.Diamond:
+                            on = Mathf.Abs(dx) + Mathf.Abs(dy) <= r;
+                            break;
+
+                        case GlyphShape.Triangle:
+                            // 上尖下宽：越靠上越窄
+                            var t = (r - dy) / (2f * r);
+                            on = t >= 0f && t <= 1f && Mathf.Abs(dx) <= r * t;
+                            break;
+
+                        case GlyphShape.Bars:
+                        {
+                            // 三条等距横线
+                            const int barCount = 3;
+                            var slot = (2f * r) / barCount;
+                            var rel = (dy + r) / slot;              // 0..3
+                            var idx = Mathf.FloorToInt(rel);
+                            var center = -r + slot * (idx + 0.5f);
+                            on = idx >= 0 && idx < barCount
+                                 && Mathf.Abs(dy - center) <= slot * 0.26f
+                                 && Mathf.Abs(dx) <= r * 0.86f;
+                            break;
+                        }
+
+                        default:   // Square
+                            on = InsideRoundedRect(px, py, c - r, c - r, r * 2f, r * 2f, r * 0.34f);
+                            break;
+                    }
+
+                    pixels[y * size + x] = on ? color : clear;
+                }
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            return tex;
+        }
+
         /// <summary>
         /// 程序生成盾牌图标。
         ///

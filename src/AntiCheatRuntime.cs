@@ -318,6 +318,10 @@ namespace ApexCheatEnder
             if (!inMeeting && _wasInMeeting) OnMeetingEnded(now);
             _wasInMeeting = inMeeting;
 
+            // ACE 客户端互认：周期性广播握手包，认出房间里同装本插件的人。
+            // 放在这里而不是 UI 层——它属于逻辑，UI 未创建时也该正常工作。
+            AcePresence.Tick();
+
             if (!inGame)
             {
                 // 不在对局中也要驱动，保持调用方契约

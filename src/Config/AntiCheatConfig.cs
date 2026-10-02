@@ -106,6 +106,12 @@ namespace ApexCheatEnder.Config
         /// <summary>把主菜单背景换成内置插画。</summary>
         public readonly ConfigEntry<bool> ShowMainMenuArt;
 
+        /// <summary>识别并标记同样装了本插件的玩家。</summary>
+        public readonly ConfigEntry<bool> AcePresenceEnabled;
+
+        /// <summary>标记文案（显示在对方名字后面）。</summary>
+        public readonly ConfigEntry<string> AcePresenceTag;
+
         // ================= 爬管道 / 滑索 =================
 
         public readonly ConfigEntry<bool> VentNonImpostor;
@@ -306,6 +312,16 @@ namespace ApexCheatEnder.Config
             ShowMainMenuArt = cfg.Bind(F, "自定义主菜单背景", true,
                 "把主菜单背景换成内置的插画。" + NL +
                 "图片已经打包进插件里了，不需要你额外放文件。");
+
+            // ---------------- 同装 ACE 的玩家 ----------------
+            AcePresenceEnabled = cfg.Bind(F, "标记同装 ACE 的玩家", true,
+                "跟同样装了 Apex Cheat Ender 的人互相认一下，" + NL +
+                "在对方名字后面加个标记，方便看出谁是自己人。" + NL +
+                "原理是发一条游戏不用的网络消息，对方也装了就会回。");
+            AcePresenceTag = cfg.Bind(F, "标记写成什么", Core.AcePresence.DefaultTag,
+                "显示在对方名字后面的文字。" + NL +
+                "默认带两个表情符号；如果游戏里显示成方块，" + NL +
+                "改成纯文字（比如 [ACE]）即可。");
 
             // ---------------- 爬管道 / 滑索 ----------------
             const string G = "爬管道和滑索";
