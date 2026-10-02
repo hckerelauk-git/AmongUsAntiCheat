@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using AmongUs.GameOptions;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.Patches
+namespace ApexCheatEnder.Patches
 {
     /// <summary>
     /// RPC 上下文：记录「当前正在处理哪条 RPC、发送者是谁」。

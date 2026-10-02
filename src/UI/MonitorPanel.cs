@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using System.Text;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Core;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace AmongUsAntiCheat.UI
+namespace ApexCheatEnder.UI
 {
     /// <summary>
     /// Apex Cheat Ender 监控面板：常驻屏幕右上角，显示防护状态与规则命中排行。

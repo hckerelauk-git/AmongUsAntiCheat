@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
-using AmongUsAntiCheat.Config;
+using ApexCheatEnder.Config;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 行为检测层：运动学与动作合法性分析。

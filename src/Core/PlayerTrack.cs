@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>某一时刻对某个玩家的观测快照。全部为值类型，避免采样时产生垃圾回收压力。</summary>
     public struct PlayerSnapshot

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 单条作弊特征。匹配是「多字段或关系」：命中任意一个标记即算命中，

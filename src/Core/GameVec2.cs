@@ -1,6 +1,6 @@
 using System;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 纯逻辑二维向量。刻意不依赖 UnityEngine.Vector2，

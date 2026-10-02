@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using AmongUs.GameOptions;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Core;
 using HarmonyLib;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.Patches
+namespace ApexCheatEnder.Patches
 {
     /// <summary>
     /// 补丁工具：按方法名在类型里查找目标方法。

@@ -4,7 +4,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.UI
+namespace ApexCheatEnder.UI
 {
     /// <summary>
     /// 主菜单背景替换。
@@ -23,7 +23,7 @@ namespace AmongUsAntiCheat.UI
     internal static class MainMenuArt
     {
         /// <summary>内嵌资源名（与 csproj 里的 LogicalName 一致）。</summary>
-        private const string ResourceName = "AmongUsAntiCheat.MainMenuArt.jpg";
+        private const string ResourceName = "ApexCheatEnder.MainMenuArt.jpg";
 
         /// <summary>背景对象可能的命名。按优先级排列。</summary>
         private static readonly string[] BackgroundNames = { "Background", "BackgroundImage", "Bg" };

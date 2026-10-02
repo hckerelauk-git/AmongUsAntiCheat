@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace AmongUsAntiCheat.UI
+namespace ApexCheatEnder.UI
 {
     /// <summary>
     /// ACE（Apex Cheat Ender）视觉规范：配色、程序生成纹理、程序生成音效。

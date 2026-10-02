@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 一个 AI 供应商的完整描述。

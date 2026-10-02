@@ -1,9 +1,9 @@
 using System.Collections.Generic;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Core;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace AmongUsAntiCheat.UI
+namespace ApexCheatEnder.UI
 {
     /// <summary>
     /// 右下角通知卡片。

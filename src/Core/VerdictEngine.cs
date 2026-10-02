@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
-using AmongUsAntiCheat.Config;
+using ApexCheatEnder.Config;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 单个玩家的判定状态：命中的规则链。

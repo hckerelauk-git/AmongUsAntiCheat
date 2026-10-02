@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace AmongUsAntiCheat.UI
+namespace ApexCheatEnder.UI
 {
     /// <summary>
     /// 桌面右下角启动画面。

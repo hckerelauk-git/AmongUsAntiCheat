@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
-using AmongUsAntiCheat.Config;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Config;
+using ApexCheatEnder.Core;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace AmongUsAntiCheat.UI
+namespace ApexCheatEnder.UI
 {
     /// <summary>
     /// 设置界面。

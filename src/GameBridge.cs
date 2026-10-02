@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using AmongUs.GameOptions;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Core;
 using UnityEngine;
 
-namespace AmongUsAntiCheat
+namespace ApexCheatEnder
 {
     /// <summary>
     /// 游戏 API 桥接层。

@@ -4,9 +4,9 @@ using System.IO;
 using System.Text;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
-using AmongUsAntiCheat.Config;
+using ApexCheatEnder.Config;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 单个已加载插件的描述信息。刻意与 BepInEx 的 PluginInfo 解耦，

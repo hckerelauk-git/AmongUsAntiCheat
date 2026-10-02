@@ -1,8 +1,8 @@
 using System.Reflection;
-using AmongUsAntiCheat.UI;
+using ApexCheatEnder.UI;
 using HarmonyLib;
 
-namespace AmongUsAntiCheat.Patches
+namespace ApexCheatEnder.Patches
 {
     /// <summary>
     /// 帧驱动：整个反作弊的心跳。

@@ -1,15 +1,15 @@
 using System;
 using System.Reflection;
-using AmongUsAntiCheat.Config;
-using AmongUsAntiCheat.Core;
-using AmongUsAntiCheat.Patches;
-using AmongUsAntiCheat.UI;
+using ApexCheatEnder.Config;
+using ApexCheatEnder.Core;
+using ApexCheatEnder.Patches;
+using ApexCheatEnder.UI;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 
-namespace AmongUsAntiCheat
+namespace ApexCheatEnder
 {
     /// <summary>
     /// 插件入口。

@@ -1,0 +1,180 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ApexCheatEnder —— Among Us (IL2CPP) 客户端反作弊插件
+    目标环境：BepInEx 6.0.0-be.735 / Unity 2022.3.44f1 / .NET 6.0.7
+
+    编译：
+      dotnet build -c Release
+    如果游戏不在默认路径，用 -p:GameDir="你的路径" 覆盖。
+
+    架构说明（2026-10 修订）：
+      本插件编为 AnyCPU，同一份 dll 可被 32 位与 64 位游戏进程加载。
+      不要再把它锁成 x86——那样在 64 位进程里会直接 BadImageFormatException
+      加载失败。运行时架构相关的东西（指针宽度、P/Invoke 结构体尺寸）
+      已在代码里按 IntPtr 自适应处理。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>ApexCheatEnder</AssemblyName>
+    <RootNamespace>ApexCheatEnder</RootNamespace>
+    <Version>1.1.1</Version>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- 32/64 位通用：AnyCPU 才能同时装进 x86 与 x64 的游戏进程 -->
+    <Platforms>AnyCPU;x86;x64</Platforms>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+
+    <!-- BepInEx 插件不需要这些附属文件 -->
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <DebugType>none</DebugType>
+    <NoWarn>$(NoWarn);CS0436;CS0618;CA1416</NoWarn>
+
+    <!-- ===== 路径配置 ===== -->
+    <GameDir Condition="'$(GameDir)' == ''">E:\STEAM\steamapps\common\Among Us</GameDir>
+    <BepInExCore>$(GameDir)\BepInEx\core</BepInExCore>
+    <BepInExInterop>$(GameDir)\BepInEx\interop</BepInExInterop>
+    <!--
+      Unity 程序集必须引用 interop 目录里的那一套，而不是 unity-libs。
+      原因：interop 里的 UnityEngine 是 Il2CppInterop 生成的，其 MonoBehaviour
+      继承链顶端是 Il2CppObjectBase；而 unity-libs 里的是另一套参考程序集，
+      类型不兼容，会导致 AddComponent<T> 等泛型约束编译失败。
+    -->
+    <BepInExUnityLibs>$(GameDir)\BepInEx\interop</BepInExUnityLibs>
+    <BepInExPlugins>$(GameDir)\BepInEx\plugins</BepInExPlugins>
+
+    <!-- 编译完成后自动拷贝到 plugins 目录；设 -p:AutoDeploy=false 可关闭 -->
+    <AutoDeploy Condition="'$(AutoDeploy)' == ''">true</AutoDeploy>
+  </PropertyGroup>
+
+  <!-- ================= BepInEx 6 运行时 ================= -->
+  <ItemGroup>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(BepInExCore)\BepInEx.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>$(BepInExCore)\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.Common">
+      <HintPath>$(BepInExCore)\BepInEx.Unity.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(BepInExCore)\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Common">
+      <HintPath>$(BepInExCore)\Il2CppInterop.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.HarmonySupport">
+      <HintPath>$(BepInExCore)\Il2CppInterop.HarmonySupport.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCore)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(BepInExCore)\MonoMod.RuntimeDetour.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SemanticVersioning">
+      <HintPath>$(BepInExCore)\SemanticVersioning.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- ================= 游戏程序集（IL2CPP interop） ================= -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(BepInExInterop)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>$(BepInExInterop)\Assembly-CSharp-firstpass.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(BepInExInterop)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppSystem">
+      <HintPath>$(BepInExInterop)\Il2CppSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppSystem.Core">
+      <HintPath>$(BepInExInterop)\Il2CppSystem.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- ================= Unity 引擎模块 ================= -->
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.Physics2DModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- 解码内嵌的主菜单背景图（JPG → Texture2D）需要它 -->
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(BepInExUnityLibs)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- ================= 内嵌资源 ================= -->
+  <ItemGroup>
+    <!--
+      主菜单背景图。用 EmbeddedResource 而不是外部文件，
+      保证「一个 dll 就是完整插件」——用户不用额外拷贝图片。
+      LogicalName 显式指定，避免受 RootNamespace / 目录结构变化影响。
+    -->
+    <EmbeddedResource Include="src\Resources\MainMenuArt.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt.jpg" />
+  </ItemGroup>
+
+  <!-- ================= 编译后自动部署 ================= -->
+  <Target Name="DeployToPlugins" AfterTargets="Build" Condition="'$(AutoDeploy)' == 'true' And Exists('$(BepInExPlugins)')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BepInExPlugins)" ContinueOnError="true" />
+    <Message Importance="high" Text="[AntiCheat] 已部署 -> $(BepInExPlugins)\$(TargetFileName)" />
+  </Target>
+
+</Project>

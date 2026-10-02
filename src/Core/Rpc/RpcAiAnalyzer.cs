@@ -4,10 +4,10 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using AmongUsAntiCheat.Config;
+using ApexCheatEnder.Config;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// AI 分析编排器。

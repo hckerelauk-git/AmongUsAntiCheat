@@ -1,10 +1,10 @@
 using System.Collections.Generic;
-using AmongUsAntiCheat.Config;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Config;
+using ApexCheatEnder.Core;
 using BepInEx.Logging;
 using UnityEngine;
 
-namespace AmongUsAntiCheat
+namespace ApexCheatEnder
 {
     /// <summary>
     /// 反作弊的纯托管运行时。

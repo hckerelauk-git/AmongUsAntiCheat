@@ -1,9 +1,9 @@
 using System.Reflection;
-using AmongUsAntiCheat.UI;
+using ApexCheatEnder.UI;
 using HarmonyLib;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.Patches
+namespace ApexCheatEnder.Patches
 {
     /// <summary>
     /// 主菜单背景替换。

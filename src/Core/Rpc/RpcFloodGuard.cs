@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
 
-namespace AmongUsAntiCheat.Core.Rpc
+namespace ApexCheatEnder.Core.Rpc
 {
     /// <summary>
     /// RPC 速率保护。按 OwnerId 做滑动窗口统计，专门覆盖大厅、加载和开局阶段。

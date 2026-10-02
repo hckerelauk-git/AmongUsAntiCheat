@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using AmongUsAntiCheat.Config;
+using ApexCheatEnder.Config;
 using BepInEx.Configuration;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>一条配置变更记录。</summary>
     public readonly struct ConfigChange

@@ -1,7 +1,7 @@
 using BepInEx.Configuration;
-using AmongUsAntiCheat.Core;
+using ApexCheatEnder.Core;
 
-namespace AmongUsAntiCheat.Config
+namespace ApexCheatEnder.Config
 {
     /// <summary>
     /// 处置方式取值。

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace AmongUsAntiCheat.Core
+namespace ApexCheatEnder.Core
 {
     /// <summary>
     /// 违规类型。命名上刻意区分「静态检测」（作弊软件存在证据）
