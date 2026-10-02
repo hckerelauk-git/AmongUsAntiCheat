@@ -225,7 +225,7 @@ namespace ApexCheatEnder
 
             foreach (var v in verdicts.Verdicts.Values)
             {
-                var level = v.EvaluateLevel(cfg);
+                var level = v.EvaluateLevel();
 
                 if (level <= RiskLevel.Normal)
                 {

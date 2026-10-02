@@ -163,6 +163,16 @@
   <!-- ================= 内嵌资源 ================= -->
   <ItemGroup>
     <!--
+      主项目是 SDK 风格，默认会 glob 目录下所有 .cs。
+      tests/ 里是独立可执行工程（有自己的 Main），必须排除，
+      否则会被一起编进插件导致「定义了多个入口点」。
+    -->
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
       主菜单背景图。用 EmbeddedResource 而不是外部文件，
       保证「一个 dll 就是完整插件」——用户不用额外拷贝图片。
       LogicalName 显式指定，避免受 RootNamespace / 目录结构变化影响。

@@ -39,6 +39,7 @@ namespace ApexCheatEnder.UI
 
         private RectTransform _fieldRect;
         private Image _fieldBg;
+        private Image _fieldGlow;
         private Text _display;
         private Text _placeholder;
         private GameObject _panel;
@@ -89,9 +90,19 @@ namespace ApexCheatEnder.UI
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(0f, 0f), new Vector2(360f, FieldHeight));
 
-            _fieldBg = UiBuilder.CreateImage("FieldBg", node.transform,
-                new Color(1f, 1f, 1f, 0.06f));
+            _fieldBg = UiBuilder.CreateImage("FieldBg", node.transform, Color.white);
+            _fieldBg.sprite = AceTheme.Card(8, 1, AceTheme.FieldBg, AceTheme.Border);
+            _fieldBg.type = Image.Type.Sliced;
             UiBuilder.Stretch(_fieldBg.rectTransform, 0f, 0f, 0f, 0f);
+
+            // 悬停高亮单独一层。
+            // 不能直接改 _fieldBg.color —— 它的贴图里已经把底色和描边烤进去了，
+            // Image.color 会与之相乘（深色底 × 青色 = 脏色），描边也会被一起染色。
+            // 加一层无描边的纯白遮罩，改它的 alpha 才是正确做法。
+            _fieldGlow = UiBuilder.CreateImage("FieldGlow", node.transform, Color.clear);
+            _fieldGlow.sprite = AceTheme.Card(8, 0, Color.white, Color.white);
+            _fieldGlow.type = Image.Type.Sliced;
+            UiBuilder.Stretch(_fieldGlow.rectTransform, 0f, 0f, 0f, 0f);
 
             _display = UiBuilder.CreateText("Display", node.transform,
                 "", UiBuilder.LoadFont(12), 12, AceTheme.TextMain, TextAnchor.MiddleLeft);
@@ -117,14 +128,18 @@ namespace ApexCheatEnder.UI
                 new Vector2(0f, -(FieldHeight + 8f)),
                 new Vector2(430f, 230f));
 
-            var bg = UiBuilder.CreateImage("PanelBg", _panel.transform, AceTheme.PanelBg);
+            var bg = UiBuilder.CreateImage("PanelBg", _panel.transform, Color.white);
+            bg.sprite = AceTheme.Card(10, 1, AceTheme.PanelBg, AceTheme.Border);
+            bg.type = Image.Type.Sliced;
             UiBuilder.Stretch(bg.rectTransform, 0f, 0f, 0f, 0f);
 
             // 底部工具条：退格 / 粘贴 / 清空 / 收起
-            var toolbar = UiBuilder.CreateImage("Toolbar", _panel.transform, AceTheme.Track);
+            var toolbar = UiBuilder.CreateImage("Toolbar", _panel.transform, Color.white);
+            toolbar.sprite = AceTheme.Card(4, 0, AceTheme.Track, AceTheme.Track);
+            toolbar.type = Image.Type.Sliced;
             UiBuilder.Place(toolbar.rectTransform,
                 new Vector2(0f, 0f), new Vector2(0f, 0f),
-                Vector2.zero, new Vector2(430f, 28f));
+                new Vector2(6f, 6f), new Vector2(418f, 28f));
         }
 
         /// <summary>
@@ -167,7 +182,8 @@ namespace ApexCheatEnder.UI
                     new Vector2(KeySize, KeySize));
 
                 var bg = node.AddComponent<Image>();
-                bg.color = new Color(1f, 1f, 1f, 0.07f);
+                bg.sprite = AceTheme.Card(5, 0, AceTheme.KeyBg, AceTheme.KeyBg);
+                bg.type = Image.Type.Sliced;
                 bg.raycastTarget = false;
 
                 var label = UiBuilder.CreateText($"KeyLabel{i}", node.transform,
@@ -303,10 +319,8 @@ namespace ApexCheatEnder.UI
             var mouse = Input.mousePosition;
             _hoverField = RectTransformUtility.RectangleContainsScreenPoint(_fieldRect, mouse, null);
 
-            if (_fieldBg != null)
-                _fieldBg.color = _hoverField
-                    ? new Color(0.18f, 0.61f, 1f, 0.22f)
-                    : new Color(1f, 1f, 1f, 0.06f);
+            if (_fieldGlow != null)
+                _fieldGlow.color = _hoverField ? AceTheme.KeyHoverBg : Color.clear;
 
             // 面板只在悬停或已展开时显示
             var showPanel = _expanded || _hoverField || CapturesMouse;

@@ -7,84 +7,15 @@ using UnityEngine;
 namespace ApexCheatEnder.Core
 {
     /// <summary>
-    /// 单个玩家的判定状态：命中的规则链。
-    /// 规则链必须保留，否则玩家申诉时无法说明「为什么判我」。
-    /// </summary>
-    public sealed class PlayerVerdict
-    {
-        public int PlayerId { get; set; }
-        public string Name { get; set; } = "?";
-
-        /// <summary>本局命中的规则条数。</summary>
-        public int EvidenceCount { get; set; }
-
-        /// <summary>其中确定性证据（Critical）的条数。</summary>
-        public int CriticalCount { get; set; }
-
-        public bool Warned { get; set; }
-        public bool KickIssued { get; set; }
-
-        /// <summary>本次处置是否同时要求封禁（由「动手的方式 = 封禁」推导）。</summary>
-        public bool BanRequested { get; set; }
-
-        /// <summary>AI 二次研判是否已确认为作弊。</summary>
-        public bool AiConfirmed { get; set; }
-
-        /// <summary>最近一次 AI 分析的结论摘要（供界面展示）。</summary>
-        public string AiSummary { get; set; }
-
-        /// <summary>最近一次 AI 分析的置信度 0~1。</summary>
-        public float AiConfidence { get; set; }
-
-        /// <summary>
-        /// 已经弹过通知的风险等级。
-        /// 用于「只在等级升级时提示一次」，避免同一玩家每帧刷屏。
-        /// </summary>
-        public RiskLevel LastNotifiedLevel { get; set; } = RiskLevel.Normal;
-
-        public List<Violation> Evidence { get; } = new List<Violation>(16);
-
-        /// <summary>
-        /// 综合判定该玩家的风险等级。
-        ///
-        /// 这是界面打标记的**唯一依据**——不允许在别处拿分数做判断。
-        /// 模型是「规则命中」，没有分数累积：
-        ///   1. 毫无命中        → 正常（不能因为"被追踪过"就标记）
-        ///   2. AI 已确认       → 已确认
-        ///   3. 有确定性命中    → 高危（物理上不可能的行为）
-        ///   4. 其余命中        → 已命中（记录在案，等你处置）
-        /// </summary>
-        public RiskLevel EvaluateLevel(AntiCheatConfig cfg)
-        {
-            if (Evidence.Count == 0) return RiskLevel.Normal;
-            if (AiConfirmed) return RiskLevel.Confirmed;
-            if (CriticalCount > 0) return RiskLevel.HighRisk;
-            return RiskLevel.Suspicious;
-        }
-
-        public void AddEvidence(Violation v)
-        {
-            Evidence.Add(v);
-            EvidenceCount++;
-            if (v.Severity == Severity.Critical) CriticalCount++;
-        }
-
-        public void Reset()
-        {
-            EvidenceCount = 0;
-            CriticalCount = 0;
-            Warned = false;
-            KickIssued = false;
-            Evidence.Clear();
-        }
-    }
-
-    /// <summary>
     /// 判定层：把命中的规则汇总成「这个玩家是否作弊」的结论，并驱动响应动作。
     ///
     /// 模型是「规则命中」，不计分：
     /// 每条规则命中即记一笔，命中确定性规则立即定为高危，
     /// 不存在累加与衰减——确定性的东西不该被时间洗掉。
+    ///
+    /// 注意：PlayerVerdict 已拆到同命名空间的 PlayerVerdict.cs。
+    /// 拆分的理由是它本身不依赖任何外部类型，而本类需要 BepInEx ——
+    /// 放一起会让「想单测 PlayerVerdict」变成必须先引入 BepInEx。
     /// </summary>
     public sealed class VerdictEngine
     {
@@ -166,7 +97,7 @@ namespace ApexCheatEnder.Core
         /// <summary>按命中等级决定是否通知 / 处置。</summary>
         private void Evaluate(PlayerVerdict verdict, float now)
         {
-            var level = verdict.EvaluateLevel(_cfg);
+            var level = verdict.EvaluateLevel();
             if (!verdict.Warned)
             {
                 verdict.Warned = true;

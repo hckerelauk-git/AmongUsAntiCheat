@@ -251,7 +251,7 @@ namespace ApexCheatEnder.UI
 
             foreach (var v in ranked)
             {
-                var level = v.EvaluateLevel(cfg);
+                var level = v.EvaluateLevel();
                 if (level > maxLevel) maxLevel = level;
                 if (level != RiskLevel.Normal) flagged.Add(v);
             }
@@ -266,8 +266,8 @@ namespace ApexCheatEnder.UI
             // 按风险等级降序，同级按命中条数降序
             flagged.Sort((a, b) =>
             {
-                var la = a.EvaluateLevel(cfg);
-                var lb = b.EvaluateLevel(cfg);
+                var la = a.EvaluateLevel();
+                var lb = b.EvaluateLevel();
                 return la != lb ? lb.CompareTo(la) : b.EvidenceCount.CompareTo(a.EvidenceCount);
             });
 
@@ -282,7 +282,7 @@ namespace ApexCheatEnder.UI
             for (var i = 0; i < rows; i++)
             {
                 var v = flagged[i];
-                var level = v.EvaluateLevel(cfg);
+                var level = v.EvaluateLevel();
 
                 sb.Append(MarkerOf(level)).Append(' ')
                   .Append(v.Name).Append("  ")

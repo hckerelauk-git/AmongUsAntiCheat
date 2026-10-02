@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Apex Cheat Ender 测试工程。
+
+    为什么不用 xUnit / NUnit：
+      本机 NuGet 下载不稳定（实测 dotnet tool install 因包损坏失败），
+      而测试要跑起来才有价值。所以改成「零依赖的控制台 runner」——
+      只用 System 命名空间，dotnet run 直接跑，失败时退出码非 0。
+
+    为什么能脱离游戏跑：
+      src/Core 里的这几个文件刻意不引用任何游戏类型与 BepInEx
+      （只用 GameVec2 这类纯逻辑类型）。这里把它们**直接编译进测试工程**，
+      不引用插件产物 —— 插件产物带一堆游戏程序集依赖，加载不了。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseAppHost>false</UseAppHost>
+    <AssemblyName>ApexCheatEnder.Tests</AssemblyName>
+    <RootNamespace>ApexCheatEnder.Tests</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 被测的纯逻辑源码（直接编入，不经过插件产物） -->
+    <Compile Include="..\src\Core\GameVec2.cs" Link="sut\GameVec2.cs" />
+    <Compile Include="..\src\Core\PlayerTrack.cs" Link="sut\PlayerTrack.cs" />
+    <Compile Include="..\src\Core\Violation.cs" Link="sut\Violation.cs" />
+    <Compile Include="..\src\Core\PlayerVerdict.cs" Link="sut\PlayerVerdict.cs" />
+  </ItemGroup>
+
+</Project>

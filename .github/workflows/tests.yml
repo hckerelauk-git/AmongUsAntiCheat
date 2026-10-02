@@ -1,0 +1,35 @@
+name: tests
+
+# 只跑测试工程，不编译插件本体。
+#
+# 为什么不在 CI 里编译插件：插件编译需要引用游戏目录下的
+# BepInEx/core 与 BepInEx/interop 程序集（Assembly-CSharp、Il2Cppmscorlib 等），
+# 这些是游戏资产，不能也不该进仓库。GitHub 的 runner 上拿不到，
+# 强行编译只会永远红。
+#
+# 而 tests/ 工程刻意只编译 src/Core 下不依赖游戏类型的纯逻辑文件，
+# 所以在任何机器上都能跑 —— 这才是能真正守住回归的部分。
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 编译测试工程
+        run: dotnet build tests/ApexCheatEnder.Tests.csproj -c Release
+
+      - name: 运行测试
+        run: dotnet tests/bin/Release/net8.0/ApexCheatEnder.Tests.dll

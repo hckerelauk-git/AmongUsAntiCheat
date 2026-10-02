@@ -474,148 +474,180 @@ namespace ApexCheatEnder.UI
 
         // ================= 页面内容 =================
 
+        /// <summary>
+        /// 按页组装设置行。
+        ///
+        /// 拆成每页一个方法：原先是一个 143 行的 switch，新增一个配置项就要在
+        /// 大函数里找位置，且六页内容混在一起没法单独看。
+        /// </summary>
         private static List<SettingRow> BuildPageModel(int page)
         {
             var cfg = AntiCheatRuntime.Config;
-            var list = new List<SettingRow>();
-            if (cfg == null) return list;
+            if (cfg == null) return new List<SettingRow>();
 
             switch (page)
             {
-                case 0:
-                    list.Add(Toggle("扫描作弊插件", cfg.EnableStaticScan,
-                        "看看别人装了什么作弊插件。几乎不会误判，建议一直开着。"));
-                    list.Add(Toggle("检测瞬移和超速", cfg.EnableBehaviorScan,
-                        "定时记录每个人的位置，抓突然消失和跑得比正常人快。"));
-                    list.Add(Toggle("检查动作是否合法", cfg.EnableEventScan,
-                        "检查击杀、爬管道这些动作在当前状态下能不能做。"));
-                    list.Add(Toggle("检测穿墙", cfg.EnableWallClipCheck,
-                        "会额外吃一点性能，网络卡时容易误判。认准作弊用上面那几项就够。"));
-                    list.Add(Toggle("右上角监控面板", cfg.ShowOverlay,
-                        "一直显示防护状态和规则命中排行。游戏中按 F8 可以临时关掉。"));
-                    list.Add(Toggle("顶部弹出提醒", cfg.ShowNotifications,
-                        "命中检测规则时在屏幕上方弹一条通知。"));
-                    list.Add(Toggle("开机启动动画", cfg.ShowDesktopSplash,
-                        "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
-                    list.Add(Toggle("输出详细日志", cfg.VerboseLogging,
-                        "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
-                    break;
-
-                case 1:
-                    list.Add(Number("一下挪多远算瞬移", cfg.TeleportMinDistance, 0.5f, 0.5f, 20f,
-                        "一次记录里位置突然变了这么多就是瞬移。正常走路一秒走不了这么远，几乎不会误判。"));
-                    list.Add(Number("允许比正常快几倍", cfg.MaxSpeedTolerance, 0.1f, 1.0f, 5.0f,
-                        "1.0 是完全不放水。正常建议 1.5 到 1.8。朋友被误判就往大了调。"));
-                    list.Add(Number("超速几次才记下来", cfg.SpeedStrikeCount, 1f, 1f, 20f,
-                        "偶尔超一下可能是卡了。连续超这么多次才算作弊证据。", true));
-                    list.Add(Number("多小的位移算抖动", cfg.PositionJitterTolerance, 0.05f, 0f, 2f,
-                        "小于这个距离当成网络延迟，不算作弊。网络差就往上调。"));
-                    list.Add(Number("看位置的间隔", cfg.SampleInterval, 0.01f, 0.02f, 1.0f,
-                        "越小抓得越紧，也越吃性能。0.1 是推荐值，觉得卡就调到 0.2。"));
-                    list.Add(Number("开局后先不管几秒", cfg.RoundStartGracePeriod, 1f, 0f, 30f,
-                        "对局刚开始大家都在传送，这段时间不判定，避免误报。"));
-                    list.Add(Number("隔多远能砍人", cfg.KillDistanceTolerance, 0.25f, 0f, 5f,
-                        "游戏设置的击杀距离之外再放宽这么多。调太小会漏掉远程击杀挂。"));
-                    list.Add(Number("冷却能提前多久", cfg.KillCooldownTolerance, 0.05f, 0f, 5f,
-                        "内鬼杀人冷却是 25 秒。能提前这么多秒再杀就是绕过冷却。"));
-                    list.Add(Number("做任务允许快几倍", cfg.TaskSpeedTolerance, 0.1f, 1.0f, 5f,
-                        "调太小会把边走边做任务的正常玩家误判成外挂。"));
-                    list.Add(Number("隔多远能交任务", cfg.RemoteTaskTolerance, 0.5f, 0f, 10f,
-                        "站在任务点附近这么远之内算完成。"));
-                    list.Add(Number("开会时允许走多远", cfg.MeetingMoveTolerance, 0.25f, 0f, 5f,
-                        "开会期间所有人都该站在会议桌附近，走太远就是有问题。"));
-                    break;
-
-                case 2:
-                    list.Add(Action("动手的方式", "命中规则之后具体做什么。建议先选「警告」观察一阵，确认没误判再用更重的。",
-                        () =>
-                        {
-                            cfg.DispositionMode.Value = DispositionModes.Next(cfg.DispositionMode.Value);
-                            FlashSaved();
-                            AntiCheatRuntime.ApplyConfigChange();
-                        },
-                        () => "[ " + cfg.DispositionMode.Value + " ]"));
-                    list.Add(Toggle("自动踢人", cfg.AllowAutoKick,
-                        "命中确定性规则就自动踢，不用你点确认。先只记录更保险。"));
-                    list.Add(Toggle("记录谁进过房间", cfg.RecordPlayerHistory,
-                        "写进 PlayerHistory.txt，方便事后查谁来过。"));
-                    list.Add(Toggle("记录作弊判定", cfg.RecordCheatHistory,
-                        "写进 CheatHistory.txt，含昵称和命中的具体规则。万一误判了，这里就是翻案证据。"));
-
-                    var verdicts = AntiCheatRuntime.Verdicts;
-                    if (verdicts != null)
-                    {
-                        foreach (var v in verdicts.RankedVerdicts())
-                        {
-                            if (v.EvaluateLevel(cfg) == RiskLevel.Normal) continue;
-                            var pid = v.PlayerId;
-                            var name = v.Name;
-                            var detail = "命中 " + v.EvidenceCount + " 条规则"
-                                       + (GameBridge.IsHost ? "" : "，你需要是房主才能踢人。");
-
-                            list.Add(Action("踢出 " + name, detail,
-                                () =>
-                                {
-                                    if (!GameBridge.IsHost) return;
-                                    var clientId = GameBridge.GetClientIdByPlayerId(pid);
-                                    if (clientId < 0) return;
-                                    var banned = DispositionModes.ShouldBan(cfg.DispositionMode.Value);
-                                    if (GameBridge.KickPlayer(clientId, banned))
-                                        AntiCheatRuntime.Log?.LogWarning("[处置] 已手动踢出「" + name + "」。");
-                                },
-                                () => GameBridge.IsHost ? "[ 点击踢出 ]" : "[ 非房主 ]"));
-                        }
-                    }
-                    break;
-
-                case 3:
-                    list.Add(Toggle("抓普通人爬管道", cfg.VentNonImpostor,
-                        "只有内鬼能爬管道。其他人爬了就是开了挂。"));
-                    list.Add(Toggle("抓隔着屏幕爬管道", cfg.VentRemote,
-                        "离管道口很远却爬进去了。"));
-                    list.Add(Toggle("抓伪造管道编号", cfg.VentForgedId,
-                        "发了一个根本不存在的管道编号，说明在改游戏数据。"));
-                    list.Add(Toggle("抓强迫别人爬管道", cfg.VentForceOther,
-                        "用漏洞让别人被强行拉进管道。"));
-                    list.Add(Toggle("抓滑索滥用", cfg.ZiplineAbuse,
-                        "强行滑索，或者开会的时候滑索。"));
-                    list.Add(Toggle("抓开会时爬管道", cfg.VentDuringMeeting,
-                        "开会期间所有人都被定在会议桌，这时候爬不了。"));
-                    list.Add(Number("爬管道允许离多远", cfg.VentDistanceTolerance, 0.5f, 0.5f, 10f,
-                        "离管道口这么远之内算正常使用。太严格会误判站在旁边的人。"));
-                    list.Add(Toggle("抓数据包刷屏", cfg.RpcFloodDetection,
-                        "有人疯狂发数据包会让全房卡顿。"));
-                    list.Add(Number("10 秒最多几次数据包", cfg.RpcRateLimit, 5f, 5f, 200f,
-                        "网络差的房间可能会误判，遇到误报就往上调。", true));
-                    list.Add(Toggle("抓瞬移式位置同步", cfg.SnapRateDetection,
-                        "反复强制同步位置，是瞬移挂的典型做法。"));
-                    list.Add(Number("10 秒最多几次同步", cfg.SnapRateLimit, 1f, 1f, 40f,
-                        "正常对局几乎不会出现连续的位置强制同步。", true));
-                    list.Add(Toggle("抓开局乱开会", cfg.BlockEarlyMeeting,
-                        "开局几秒内疯狂开会举报的，通常是在刷屏或者想破坏游戏。"));
-                    list.Add(Number("开局后几秒内不许开会", cfg.EarlyMeetingGrace, 1f, 0f, 60f,
-                        "这段时间内开会举报会被拦下来。"));
-                    list.Add(Toggle("抓超大数据包", cfg.OversizedPacketCheck,
-                        "异常大的数据包，可能是想拖垮所有人。"));
-                    break;
-
-                case 4:
-                    list.AddRange(BuildAiPage());
-                    break;
-
-                default:
-                    // 版本号直接取常量，避免与 csproj 的 <Version> 各写各的（曾因此对不上）
-                    list.Add(Info("插件名称", "Apex Cheat Ender",
-                        () => AntiCheatPlugin.PluginVersion));
-                    list.Add(Info("快捷键", "Insert 打开这个界面，F8 开关右上角监控面板。", () => ""));
-                    list.Add(Info("改配置要不要重启", "不用。用记事本改完保存，游戏里几秒内自动生效。", () => ""));
-                    list.Add(Info("配置文件在哪", "BepInEx/config/apex.cheat.ender.cfg", () => ""));
-                    list.Add(Info("被误判了怎么办", "去「跑多快算作弊」页把倍数往松了调，或者关掉对应那条检测。", () => ""));
-                    list.Add(Info("运行环境", "BepInEx 6 / IL2CPP / .NET 6", () => ""));
-                    list.Add(Info("参考", "判定思路借鉴了 Amethyst 反作弊的设计。", () => ""));
-                    break;
+                case 0: return BuildGeneralPage(cfg);
+                case 1: return BuildMovementPage(cfg);
+                case 2: return BuildDispositionPage(cfg);
+                case 3: return BuildVentPage(cfg);
+                case 4: return BuildAiPage();
+                default: return BuildAboutPage();
             }
+        }
 
+        /// <summary>页 0「开着什么」：总开关与界面显示。</summary>
+        private static List<SettingRow> BuildGeneralPage(AntiCheatConfig cfg)
+        {
+            var list = new List<SettingRow>();
+            list.Add(Toggle("扫描作弊插件", cfg.EnableStaticScan,
+                "看看别人装了什么作弊插件。几乎不会误判，建议一直开着。"));
+            list.Add(Toggle("检测瞬移和超速", cfg.EnableBehaviorScan,
+                "定时记录每个人的位置，抓突然消失和跑得比正常人快。"));
+            list.Add(Toggle("检查动作是否合法", cfg.EnableEventScan,
+                "检查击杀、爬管道这些动作在当前状态下能不能做。"));
+            list.Add(Toggle("检测穿墙", cfg.EnableWallClipCheck,
+                "会额外吃一点性能，网络卡时容易误判。认准作弊用上面那几项就够。"));
+            list.Add(Toggle("右上角监控面板", cfg.ShowOverlay,
+                "一直显示防护状态和规则命中排行。游戏中按 F8 可以临时关掉。"));
+            list.Add(Toggle("顶部弹出提醒", cfg.ShowNotifications,
+                "命中检测规则时在屏幕上方弹一条通知。"));
+            list.Add(Toggle("开机启动动画", cfg.ShowDesktopSplash,
+                "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
+            list.Add(Toggle("自定义主菜单背景", cfg.ShowMainMenuArt,
+                "把主菜单背景换成内置插画。图片已打包进插件，不需要额外文件。"));
+            list.Add(Toggle("输出详细日志", cfg.VerboseLogging,
+                "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
+            return list;
+        }
+
+        /// <summary>页 1「跑多快算作弊」：阈值类参数，误判了就在这里调松。</summary>
+        private static List<SettingRow> BuildMovementPage(AntiCheatConfig cfg)
+        {
+            var list = new List<SettingRow>();
+            list.Add(Number("一下挪多远算瞬移", cfg.TeleportMinDistance, 0.5f, 0.5f, 20f,
+                "一次记录里位置突然变了这么多就是瞬移。正常走路一秒走不了这么远，几乎不会误判。"));
+            list.Add(Number("允许比正常快几倍", cfg.MaxSpeedTolerance, 0.1f, 1.0f, 5.0f,
+                "1.0 是完全不放水。正常建议 1.5 到 1.8。朋友被误判就往大了调。"));
+            list.Add(Number("超速几次才记下来", cfg.SpeedStrikeCount, 1f, 1f, 20f,
+                "偶尔超一下可能是卡了。连续超这么多次才算作弊证据。", true));
+            list.Add(Number("多小的位移算抖动", cfg.PositionJitterTolerance, 0.05f, 0f, 2f,
+                "小于这个距离当成网络延迟，不算作弊。网络差就往上调。"));
+            list.Add(Number("看位置的间隔", cfg.SampleInterval, 0.01f, 0.02f, 1.0f,
+                "越小抓得越紧，也越吃性能。0.1 是推荐值，觉得卡就调到 0.2。"));
+            list.Add(Number("开局后先不管几秒", cfg.RoundStartGracePeriod, 1f, 0f, 30f,
+                "对局刚开始大家都在传送，这段时间不判定，避免误报。"));
+            list.Add(Number("隔多远能砍人", cfg.KillDistanceTolerance, 0.25f, 0f, 5f,
+                "游戏设置的击杀距离之外再放宽这么多。调太小会漏掉远程击杀挂。"));
+            list.Add(Number("冷却能提前多久", cfg.KillCooldownTolerance, 0.05f, 0f, 5f,
+                "内鬼杀人冷却是 25 秒。能提前这么多秒再杀就是绕过冷却。"));
+            list.Add(Number("做任务允许快几倍", cfg.TaskSpeedTolerance, 0.1f, 1.0f, 5f,
+                "调太小会把边走边做任务的正常玩家误判成外挂。"));
+            list.Add(Number("隔多远能交任务", cfg.RemoteTaskTolerance, 0.5f, 0f, 10f,
+                "站在任务点附近这么远之内算完成。"));
+            list.Add(Number("开会时允许走多远", cfg.MeetingMoveTolerance, 0.25f, 0f, 5f,
+                "开会期间所有人都该站在会议桌附近，走太远就是有问题。"));
+            list.Add(Number("聊天 10 秒最多几条", cfg.ChatRateLimit, 1f, 3f, 50f,
+                "超过这个数量算刷屏。正常聊天很难达到 8 条。", true));
+            list.Add(Number("昵称最长多少字", cfg.NameMaxLength, 1f, 5f, 60f,
+                "超过算异常。游戏原生上限是 10，这里留了余量。", true));
+            return list;
+        }
+
+        /// <summary>页 2「抓到怎么办」：处置方式与记录。</summary>
+        private static List<SettingRow> BuildDispositionPage(AntiCheatConfig cfg)
+        {
+            var list = new List<SettingRow>();
+            list.Add(Action("动手的方式", "命中规则之后具体做什么。建议先选「警告」观察一阵，确认没误判再用更重的。",
+                () =>
+                {
+                    cfg.DispositionMode.Value = DispositionModes.Next(cfg.DispositionMode.Value);
+                    FlashSaved();
+                    AntiCheatRuntime.ApplyConfigChange();
+                },
+                () => "[ " + cfg.DispositionMode.Value + " ]"));
+            list.Add(Toggle("自动踢人", cfg.AllowAutoKick,
+                "命中确定性规则就自动踢，不用你点确认。先只记录更保险。"));
+            list.Add(Toggle("记录谁进过房间", cfg.RecordPlayerHistory,
+                "写进 PlayerHistory.txt，方便事后查谁来过。"));
+            list.Add(Toggle("记录作弊判定", cfg.RecordCheatHistory,
+                "写进 CheatHistory.txt，含昵称和命中的具体规则。万一误判了，这里就是翻案证据。"));
+
+            // 当前命中列表 → 逐人提供「踢出」按钮
+            var verdicts = AntiCheatRuntime.Verdicts;
+            if (verdicts == null) return list;
+
+            foreach (var v in verdicts.RankedVerdicts())
+            {
+                if (v.EvaluateLevel() == RiskLevel.Normal) continue;
+                var pid = v.PlayerId;
+                var name = v.Name;
+                var detail = "命中 " + v.EvidenceCount + " 条规则"
+                           + (GameBridge.IsHost ? "" : "，你需要是房主才能踢人。");
+
+                list.Add(Action("踢出 " + name, detail,
+                    () =>
+                    {
+                        if (!GameBridge.IsHost) return;
+                        var clientId = GameBridge.GetClientIdByPlayerId(pid);
+                        if (clientId < 0) return;
+                        var banned = DispositionModes.ShouldBan(cfg.DispositionMode.Value);
+                        if (GameBridge.KickPlayer(clientId, banned))
+                            AntiCheatRuntime.Log?.LogWarning("[处置] 已手动踢出「" + name + "」。");
+                    },
+                    () => GameBridge.IsHost ? "[ 点击踢出 ]" : "[ 非房主 ]"));
+            }
+            return list;
+        }
+
+        /// <summary>页 3「爬管道」：通风管 / 滑索 / 网络防护。</summary>
+        private static List<SettingRow> BuildVentPage(AntiCheatConfig cfg)
+        {
+            var list = new List<SettingRow>();
+            list.Add(Toggle("抓普通人爬管道", cfg.VentNonImpostor,
+                "只有内鬼能爬管道。其他人爬了就是开了挂。"));
+            list.Add(Toggle("抓隔着屏幕爬管道", cfg.VentRemote,
+                "离管道口很远却爬进去了。"));
+            list.Add(Toggle("抓伪造管道编号", cfg.VentForgedId,
+                "发了一个根本不存在的管道编号，说明在改游戏数据。"));
+            list.Add(Toggle("抓强迫别人爬管道", cfg.VentForceOther,
+                "用漏洞让别人被强行拉进管道。"));
+            list.Add(Toggle("抓滑索滥用", cfg.ZiplineAbuse,
+                "强行滑索，或者开会的时候滑索。"));
+            list.Add(Toggle("抓开会时爬管道", cfg.VentDuringMeeting,
+                "开会期间所有人都被定在会议桌，这时候爬不了。"));
+            list.Add(Number("爬管道允许离多远", cfg.VentDistanceTolerance, 0.5f, 0.5f, 10f,
+                "离管道口这么远之内算正常使用。太严格会误判站在旁边的人。"));
+            list.Add(Toggle("抓数据包刷屏", cfg.RpcFloodDetection,
+                "有人疯狂发数据包会让全房卡顿。"));
+            list.Add(Number("10 秒最多几次数据包", cfg.RpcRateLimit, 5f, 5f, 200f,
+                "网络差的房间可能会误判，遇到误报就往上调。", true));
+            list.Add(Toggle("抓瞬移式位置同步", cfg.SnapRateDetection,
+                "反复强制同步位置，是瞬移挂的典型做法。"));
+            list.Add(Number("10 秒最多几次同步", cfg.SnapRateLimit, 1f, 1f, 40f,
+                "正常对局几乎不会出现连续的位置强制同步。", true));
+            list.Add(Toggle("抓开局乱开会", cfg.BlockEarlyMeeting,
+                "开局几秒内疯狂开会举报的，通常是在刷屏或者想破坏游戏。"));
+            list.Add(Number("开局后几秒内不许开会", cfg.EarlyMeetingGrace, 1f, 0f, 60f,
+                "这段时间内开会举报会被拦下来。"));
+            list.Add(Toggle("抓超大数据包", cfg.OversizedPacketCheck,
+                "异常大的数据包，可能是想拖垮所有人。"));
+            return list;
+        }
+
+        /// <summary>页「关于」：版本与帮助。</summary>
+        private static List<SettingRow> BuildAboutPage()
+        {
+            var list = new List<SettingRow>();
+            // 版本号直接取常量，避免与 csproj 的 <Version> 各写各的（曾因此对不上）
+            list.Add(Info("插件名称", "Apex Cheat Ender",
+                () => AntiCheatPlugin.PluginVersion));
+            list.Add(Info("快捷键", "Insert 打开这个界面，F8 开关右上角监控面板。", () => ""));
+            list.Add(Info("改配置要不要重启", "不用。用记事本改完保存，游戏里几秒内自动生效。", () => ""));
+            list.Add(Info("配置文件在哪", "BepInEx/config/apex.cheat.ender.cfg", () => ""));
+            list.Add(Info("被误判了怎么办", "去「跑多快算作弊」页把倍数往松了调，或者关掉对应那条检测。", () => ""));
+            list.Add(Info("运行环境", "BepInEx 6 / IL2CPP / .NET 6", () => ""));
+            list.Add(Info("参考", "判定思路借鉴了 Amethyst 反作弊的设计。", () => ""));
             return list;
         }
 
@@ -794,7 +826,7 @@ namespace ApexCheatEnder.UI
 
             foreach (var v in verdicts.RankedVerdicts())
             {
-                if (v.EvaluateLevel(cfg) == RiskLevel.Normal) continue;
+                if (v.EvaluateLevel() == RiskLevel.Normal) continue;
 
                 var pid = v.PlayerId;
                 var verdict = v;

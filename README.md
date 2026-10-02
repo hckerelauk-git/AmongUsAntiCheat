@@ -80,6 +80,23 @@ RPC 与玩家行为做语义级校验，在房主侧拦截作弊并给出可解�
 
 ---
 
+## 构建与测试
+
+```bash
+# 编译插件（需要游戏与 BepInEx 已安装；产物 bin/Release/ApexCheatEnder.dll）
+dotnet build -c Release
+
+# 跑核心逻辑测试（零依赖，不需要游戏）
+dotnet build tests/ApexCheatEnder.Tests.csproj -c Release
+dotnet tests/bin/Release/net8.0/ApexCheatEnder.Tests.dll
+```
+
+`tests/` 是**独立的零依赖控制台工程**，它直接编译 `src/Core` 下不引用游戏类型的纯逻辑文件
+（`GameVec2` / `PlayerTrack` / `Violation` / `PlayerVerdict`），因此在任何机器上都能跑。
+CI（`.github/workflows/tests.yml`）只跑这一部分——插件本体的编译需要游戏资产，CI 上拿不到。
+
+---
+
 ## 文档索引
 
 | 文档 | 内容 |

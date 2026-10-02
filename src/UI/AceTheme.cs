@@ -74,6 +74,15 @@ namespace ApexCheatEnder.UI
         public static readonly Color ScrollTrack = new Color32(0x14, 0x20, 0x33, 0x80);
         public static readonly Color ScrollThumb = new Color32(0x2E, 0xE6, 0xD6, 0xB0);
 
+        /// <summary>文本输入框底色。</summary>
+        public static readonly Color FieldBg = new Color32(0x0E, 0x18, 0x28, 0xE6);
+
+        /// <summary>虚拟键盘按键底色。</summary>
+        public static readonly Color KeyBg = new Color32(0x1A, 0x28, 0x3E, 0xE8);
+
+        /// <summary>虚拟键盘按键悬停态。</summary>
+        public static readonly Color KeyHoverBg = new Color32(0x2E, 0xE6, 0xD6, 0x66);
+
         // ================= 纹理生成 =================
 
         /// <summary>生成 1x1 纯色纹理，用作 Image 的贴图。</summary>
