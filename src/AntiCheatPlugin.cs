@@ -24,7 +24,7 @@ namespace AmongUsAntiCheat
     {
         public const string PluginGuid = "apex.cheat.ender";
         public const string PluginName = "ApexCheatEnder";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.1.1";
 
         /// <summary>供补丁层写日志的全局入口。</summary>
         internal static ManualLogSource LogSource;
