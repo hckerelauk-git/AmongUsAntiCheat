@@ -14,11 +14,37 @@ namespace ApexCheatEnder.Patches
     /// 存在的原因：有些方法（如 <c>ShipStatus.UpdateSystem</c>）的签名里**没有玩家信息**，
     /// 而它们又是由某条 RPC 触发的。做法是在 <c>PlayerControl.HandleRpc</c> 的 Prefix 里
     /// 记下发送者，下游补丁再从上下文里取——避免去解析 MessageReader。
+    ///
+    /// 用**栈**而不是单个静态字段：RPC 处理过程中可能嵌套触发另一条 RPC
+    /// （A 的 HandleRpc → 游戏逻辑 → B 的 HandleRpc）。用单字段的话，
+    /// 内层会覆盖外层，等外层继续往下走时读到的就是**别人的发送者**，
+    /// 证据会归错人。栈结构天然支持嵌套，Prefix push / Postfix pop。
     /// </summary>
     internal static class RpcContext
     {
-        public static PlayerControl Sender;
-        public static int CallId = -1;
+        private struct Frame
+        {
+            public PlayerControl Sender;
+            public int CallId;
+        }
+
+        private static readonly Stack<Frame> Stack = new Stack<Frame>(8);
+
+        /// <summary>当前正在处理的 RPC 的发送者；栈空时为 null。</summary>
+        public static PlayerControl Sender =>
+            Stack.Count > 0 ? Stack.Peek().Sender : null;
+
+        /// <summary>当前正在处理的 RPC 的 callId；栈空时为 -1。</summary>
+        public static int CallId =>
+            Stack.Count > 0 ? Stack.Peek().CallId : -1;
+
+        public static void Push(PlayerControl sender, int callId) =>
+            Stack.Push(new Frame { Sender = sender, CallId = callId });
+
+        public static void Pop()
+        {
+            if (Stack.Count > 0) Stack.Pop();
+        }
 
         /// <summary>取发送者对应的玩家轨迹；拿不到返回 null。</summary>
         public static PlayerTrack SenderTrack()
@@ -31,7 +57,10 @@ namespace ApexCheatEnder.Patches
         }
     }
 
-    /// <summary>在 HandleRpc 入口记录发送者，供没有玩家参数的下游补丁取用。</summary>
+    /// <summary>
+    /// 在 HandleRpc 入口记录发送者，出口弹出，供没有玩家参数的下游补丁取用。
+    /// Prefix 与 Postfix 必须成对 —— 少了 Postfix 栈会无限增长。
+    /// </summary>
     [HarmonyPatch]
     internal static class RpcContextPatch
     {
@@ -42,14 +71,19 @@ namespace ApexCheatEnder.Patches
         {
             try
             {
-                RpcContext.Sender = __instance;
-                RpcContext.CallId = ExtractCallId(__args);
+                RpcContext.Push(__instance, ExtractCallId(__args));
             }
             catch
             {
-                RpcContext.Sender = null;
-                RpcContext.CallId = -1;
+                // 入栈失败也要压一个空帧，保证 Prefix/Postfix 配对，
+                // 否则 Pop 会把外层的帧弹掉，导致外层读到 null。
+                try { RpcContext.Push(null, -1); } catch { }
             }
+        }
+
+        private static void Postfix()
+        {
+            try { RpcContext.Pop(); } catch { }
         }
 
         private static int ExtractCallId(object[] args)

@@ -52,6 +52,28 @@ namespace ApexCheatEnder.UI
         /// <summary>进度条底槽。</summary>
         public static readonly Color Track = new Color32(0x14, 0x2E, 0x4A, 0xFF);
 
+        // ================= 设置界面专用（语义化，避免各处硬编码） =================
+
+        /// <summary>左侧页签栏底色。</summary>
+        public static readonly Color TabColumnBg = new Color32(0x0E, 0x18, 0x28, 0xF6);
+
+        /// <summary>页签选中态底色。</summary>
+        public static readonly Color TabActiveBg = new Color32(0x2E, 0xE6, 0xD6, 0x24);
+
+        /// <summary>设置行底板（两种交替，制造斑马纹便于横向读行）。</summary>
+        public static readonly Color RowBgA = new Color32(0x14, 0x20, 0x33, 0xC4);
+        public static readonly Color RowBgB = new Color32(0x10, 0x1A, 0x2B, 0xC4);
+
+        /// <summary>数字行的「−」按钮底色（暗色，表示减弱）。</summary>
+        public static readonly Color BtnMinusBg = new Color32(0x1E, 0x3A, 0x5F, 0xE0);
+
+        /// <summary>数字行的「+」按钮底色（青色，表示增强）。</summary>
+        public static readonly Color BtnPlusBg = new Color32(0x2E, 0xE6, 0xD6, 0x9E);
+
+        /// <summary>滚动条轨道 / 滑块。</summary>
+        public static readonly Color ScrollTrack = new Color32(0x14, 0x20, 0x33, 0x80);
+        public static readonly Color ScrollThumb = new Color32(0x2E, 0xE6, 0xD6, 0xB0);
+
         // ================= 纹理生成 =================
 
         /// <summary>生成 1x1 纯色纹理，用作 Image 的贴图。</summary>

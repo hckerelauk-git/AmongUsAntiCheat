@@ -3,10 +3,11 @@
 Among Us 客户端反作弊插件。基于 **BepInEx 6（IL2CPP）+ Harmony**，以「规则命中」模型对房间内的
 RPC 与玩家行为做语义级校验，在房主侧拦截作弊并给出可解释的判定依据。
 
-> **关于命名**：插件的身份是 `Apex Cheat Ender`（GUID `apex.cheat.ender`，
-> 配置文件名 `apex.cheat.ender.cfg`）。
-> 仓库名与程序集名仍为 `AmongUsAntiCheat` —— 这是历史命名，
-> 改动会破坏已有用户的配置路径与依赖，故保留。
+> **关于命名**：插件身份、程序集名、命名空间、项目文件名**统一为 `Apex Cheat Ender`**
+> （产物 `ApexCheatEnder.dll`）。
+> 唯一保持不变的是 **GUID `apex.cheat.ender`** 与 **配置文件名 `apex.cheat.ender.cfg`** ——
+> BepInEx 按 GUID 识别插件、按 GUID 定位配置文件，改动这两项会让已有用户的配置失效。
+> 仓库地址仍是 `AmongUsAntiCheat`（GitHub 仓库名，不影响插件运行）。
 
 - 插件 GUID：`apex.cheat.ender`
 - 目标环境：Among Us（IL2CPP）+ BepInEx 6.0.0-be.735+ / Unity 2022.3.44f1 / .NET 6.0
