@@ -22,6 +22,9 @@ namespace AmongUsAntiCheat.UI
         /// <summary>面板底色。</summary>
         public static readonly Color PanelBg = new Color32(0x12, 0x1C, 0x2E, 0xE8);
 
+        /// <summary>徽标 / 按钮底衬（比面板底色略亮，用于制造层次）。</summary>
+        public static readonly Color BadgeBg = new Color32(0x18, 0x26, 0x3C, 0xFF);
+
         /// <summary>描边（低饱和，只做边界不抢视线）。</summary>
         public static readonly Color Border = new Color32(0x1E, 0x3A, 0x5F, 0xFF);
 
@@ -59,6 +62,110 @@ namespace AmongUsAntiCheat.UI
             tex.Apply();
             return tex;
         }
+
+        /// <summary>
+        /// 生成「圆角矩形 + 描边」的 **9 宫格 Sprite**。
+        ///
+        /// 为什么必须用 9 宫格：
+        ///   uGUI 的 Image 直接拉伸一张圆角贴图，圆角会被拉成椭圆 —— 尺寸一变就露馅。
+        ///   Sprite.Create 传 border 参数后，Unity 只拉伸中间区域、四个角保持原样，
+        ///   于是一张 64×64 的小图能适配任意尺寸的卡片，圆角永远不变形。
+        ///   这是「看起来做过设计」和「看起来是程序员拉的方块」之间最关键的一步。
+        ///
+        /// 尺寸约定：贴图边长 = radius*2 + 8，9 宫格边距 = radius + 1。
+        /// </summary>
+        /// <param name="radius">圆角半径（像素）。</param>
+        /// <param name="borderWidth">描边宽度（像素）；传 0 表示无描边。</param>
+        /// <param name="fill">填充色。</param>
+        /// <param name="border">描边色；borderWidth 为 0 时忽略。</param>
+        public static Sprite MakeCard(int radius, int borderWidth, Color fill, Color border)
+        {
+            if (radius < 1) radius = 1;
+            var size = radius * 2 + 8;
+
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            var pixels = new Color[size * size];
+            var transparent = new Color(0f, 0f, 0f, 0f);
+
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    // 用像素中心点采样，避免边缘半像素误差导致锯齿
+                    var px = x + 0.5f;
+                    var py = y + 0.5f;
+
+                    if (!InsideRoundedRect(px, py, 0f, 0f, size, size, radius))
+                    {
+                        pixels[y * size + x] = transparent;
+                        continue;
+                    }
+
+                    // 内缩 borderWidth 的圆角矩形；落在它外面的部分就是描边
+                    var isBorder = borderWidth > 0 &&
+                                   !InsideRoundedRect(px, py,
+                                       borderWidth, borderWidth,
+                                       size - borderWidth * 2f, size - borderWidth * 2f,
+                                       Mathf.Max(1f, radius - borderWidth));
+
+                    pixels[y * size + x] = isBorder ? border : fill;
+                }
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+
+            var b = radius + 1f;
+            return Sprite.Create(
+                tex,
+                new Rect(0f, 0f, size, size),
+                new Vector2(0.5f, 0.5f),
+                100f,
+                0,
+                SpriteMeshType.FullRect,
+                new Vector4(b, b, b, b));   // ← 9 宫格边距，圆角不参与拉伸
+        }
+
+        /// <summary>
+        /// 点是否落在圆角矩形内。
+        /// 做法：把点钳制到「去掉圆角后的内矩形」上，再看它到钳制点的距离是否 ≤ 半径。
+        /// 这是圆角矩形判定的经典写法，比逐个圆角判断省事且没有接缝。
+        /// </summary>
+        private static bool InsideRoundedRect(
+            float x, float y, float left, float top, float w, float h, float r)
+        {
+            var minX = left + r;
+            var maxX = left + w - r;
+            var minY = top + r;
+            var maxY = top + h - r;
+
+            var cx = Mathf.Clamp(x, minX, maxX);
+            var cy = Mathf.Clamp(y, minY, maxY);
+
+            var dx = x - cx;
+            var dy = y - cy;
+            return dx * dx + dy * dy <= r * r;
+        }
+
+        /// <summary>把 9 宫格 Sprite 包成可直接赋给 Image 的缓存（按参数去重）。</summary>
+        private static readonly System.Collections.Generic.Dictionary<string, Sprite> CardCache
+            = new System.Collections.Generic.Dictionary<string, Sprite>();
+
+        public static Sprite Card(int radius, int borderWidth, Color fill, Color border)
+        {
+            var key = radius + "|" + borderWidth + "|" + ColorKey(fill) + "|" + ColorKey(border);
+            if (CardCache.TryGetValue(key, out var cached) && cached != null) return cached;
+
+            var sprite = MakeCard(radius, borderWidth, fill, border);
+            CardCache[key] = sprite;
+            return sprite;
+        }
+
+        private static string ColorKey(Color c) =>
+            ((int)(c.r * 255)).ToString() + "," + ((int)(c.g * 255)).ToString() + "," +
+            ((int)(c.b * 255)).ToString() + "," + ((int)(c.a * 255)).ToString();
 
         /// <summary>
         /// 程序生成盾牌图标。

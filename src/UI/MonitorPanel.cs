@@ -25,10 +25,16 @@ namespace AmongUsAntiCheat.UI
     internal static class MonitorPanel
     {
         private const float PanelWidth = 348f;
-        private const float PanelHeight = 216f;
+        private const float PanelHeight = 232f;
         private const float Margin = 20f;
         private const int MaxRows = 6;
         private const int BarLength = 8;
+
+        /// <summary>卡片圆角半径（像素）。</summary>
+        private const int CardRadius = 14;
+
+        /// <summary>顶部/底部条距卡片边缘的内缩距离。</summary>
+        private const float CardInset = 8f;
 
         private static bool _built;
         private static GameObject _root;
@@ -83,22 +89,35 @@ namespace AmongUsAntiCheat.UI
                 new Vector2(-Margin, -Margin),
                 new Vector2(PanelWidth, PanelHeight));
 
-            // ---- 底板 ----
-            var bg = UiBuilder.CreateImage("Bg", _root.transform, AceTheme.PanelBg);
+            // ---- 底板：圆角卡片（9 宫格，圆角不会随尺寸变形） ----
+            var bg = UiBuilder.CreateImage("Bg", _root.transform, Color.white);
+            bg.sprite = AceTheme.Card(CardRadius, 1, AceTheme.PanelBg, AceTheme.Border);
+            bg.type = Image.Type.Sliced;
             UiBuilder.Stretch(bg.rectTransform, 0f, 0f, 0f, 0f);
 
-            // ---- 顶部强调条 ----
+            // ---- 顶部强调条：内缩的圆角条，不再是一条贴边的直线 ----
+            // 贴图用白色生成、靠 Image.color 上色 —— 这样后续要改色只需改 color，
+            // 若把颜色烤进贴图，Image.color 会与之相乘（Success × Danger = 黑）。
             var topBar = UiBuilder.CreateImage("TopBar", _root.transform, AceTheme.Primary);
+            topBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
+            topBar.type = Image.Type.Sliced;
             UiBuilder.Place(topBar.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                Vector2.zero, new Vector2(PanelWidth, 2f));
+                new Vector2(CardInset, -CardInset), new Vector2(PanelWidth - CardInset * 2f, 3f));
 
-            // ---- 盾牌图标 ----
-            var shieldTex = AceTheme.MakeShield(48, AceTheme.Primary, AceTheme.Accent);
+            // ---- 盾牌徽标：放在圆角方块底衬里，比裸图标有分量 ----
+            var badge = UiBuilder.CreateImage("Badge", _root.transform, Color.white);
+            badge.sprite = AceTheme.Card(7, 1, AceTheme.BadgeBg, AceTheme.Border);
+            badge.type = Image.Type.Sliced;
+            UiBuilder.Place(badge.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(14f, -18f), new Vector2(26f, 26f));
+
+            var shieldTex = AceTheme.MakeShield(40, AceTheme.Primary, AceTheme.Accent);
             _shield = UiBuilder.CreateImage("Shield", _root.transform, Color.white, shieldTex);
             UiBuilder.Place(_shield.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(12f, -11f), new Vector2(24f, 24f));
+                new Vector2(17f, -21f), new Vector2(20f, 20f));
 
             // ---- 标题 ----
             _headerText = UiBuilder.CreateText("Header", _root.transform,
@@ -106,7 +125,7 @@ namespace AmongUsAntiCheat.UI
                 TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(_headerText.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(44f, -12f), new Vector2(220f, 20f));
+                new Vector2(48f, -19f), new Vector2(200f, 22f));
 
             // ---- 状态点 ----
             _statusDot = UiBuilder.CreateText("StatusDot", _root.transform,
@@ -114,53 +133,60 @@ namespace AmongUsAntiCheat.UI
                 TextAnchor.UpperRight, FontStyle.Bold);
             UiBuilder.Place(_statusDot.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(PanelWidth - 138f, -13f), new Vector2(126f, 18f));
+                new Vector2(PanelWidth - 146f, -20f), new Vector2(132f, 20f));
 
-            // ---- 分隔线 ----
-            var divider1 = UiBuilder.CreateImage("Divider1", _root.transform, AceTheme.Border);
+            // ---- 分隔线（用圆角卡片做，比纯色细线柔和） ----
+            var divider1 = UiBuilder.CreateImage("Divider1", _root.transform, Color.white);
+            divider1.sprite = AceTheme.Card(1, 0, AceTheme.Border, AceTheme.Border);
+            divider1.type = Image.Type.Sliced;
             UiBuilder.Place(divider1.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(12f, -40f), new Vector2(PanelWidth - 24f, 1f));
+                new Vector2(CardInset, -52f), new Vector2(PanelWidth - CardInset * 2f, 1f));
 
             // ---- 摘要行 ----
             _summaryText = UiBuilder.CreateText("Summary", _root.transform,
-                "插件 --  信任 --  命中 --", font, 11, AceTheme.TextDim);
+                "插件 --   信任 --   命中 --", font, 11, AceTheme.TextDim);
             UiBuilder.Place(_summaryText.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(14f, -50f), new Vector2(PanelWidth - 28f, 18f));
+                new Vector2(16f, -62f), new Vector2(PanelWidth - 32f, 18f));
 
             // ---- 排行标题 ----
             var listTitle = UiBuilder.CreateText("ListTitle", _root.transform,
                 "规则命中", font, 11, AceTheme.Accent, TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(listTitle.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(14f, -72f), new Vector2(200f, 18f));
+                new Vector2(16f, -86f), new Vector2(200f, 18f));
 
             // ---- 排行内容 ----
             _listText = UiBuilder.CreateText("List", _root.transform,
                 "当前无人命中规则", font, 11, AceTheme.TextMain);
             UiBuilder.Place(_listText.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(14f, -92f), new Vector2(PanelWidth - 28f, 100f));
+                new Vector2(16f, -106f), new Vector2(PanelWidth - 32f, 96f));
 
             // ---- 底部分隔线 ----
-            var divider2 = UiBuilder.CreateImage("Divider2", _root.transform, AceTheme.Border);
+            var divider2 = UiBuilder.CreateImage("Divider2", _root.transform, Color.white);
+            divider2.sprite = AceTheme.Card(1, 0, AceTheme.Border, AceTheme.Border);
+            divider2.type = Image.Type.Sliced;
             UiBuilder.Place(divider2.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(12f, -196f), new Vector2(PanelWidth - 24f, 1f));
+                new Vector2(CardInset, -204f), new Vector2(PanelWidth - CardInset * 2f, 1f));
 
             // ---- 底部提示 ----
             var hint = UiBuilder.CreateText("Hint", _root.transform,
                 "F8 隐藏面板", font, 10, AceTheme.TextDim, TextAnchor.UpperLeft);
             UiBuilder.Place(hint.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(14f, -200f), new Vector2(200f, 16f));
+                new Vector2(16f, -208f), new Vector2(200f, 16f));
 
-            // ---- 底部状态条（随风险变色） ----
+            // ---- 底部状态条：圆角，内缩，不再是贴边直线 ----
+            // 同样用白色贴图 + color 上色，SetGlobalStatus 才能自由改色。
             _statusBar = UiBuilder.CreateImage("StatusBar", _root.transform, AceTheme.Success);
+            _statusBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
+            _statusBar.type = Image.Type.Sliced;
             UiBuilder.Place(_statusBar.rectTransform,
                 new Vector2(0f, 0f), new Vector2(0f, 0f),
-                Vector2.zero, new Vector2(PanelWidth, 2f));
+                new Vector2(CardInset, CardInset), new Vector2(PanelWidth - CardInset * 2f, 3f));
         }
 
         /// <summary>每帧刷新。</summary>

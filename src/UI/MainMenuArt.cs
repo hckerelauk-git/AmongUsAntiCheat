@@ -36,9 +36,6 @@ namespace AmongUsAntiCheat.UI
         private const float RecheckInterval = 0.5f;
         private static float _nextCheckTime;
 
-        /// <summary>是否已经成功替换过（用于日志去重）。</summary>
-        private static bool _appliedOnce;
-
         /// <summary>
         /// 把主菜单背景换成自定义图。由补丁在 Start / Update 里调用。
         /// </summary>
@@ -64,11 +61,7 @@ namespace AmongUsAntiCheat.UI
                 if (renderer == null) return;
 
                 // 已经是我们的图就不重复赋值（Sprite 比较是引用比较，很便宜）
-                if (renderer.sprite == sprite)
-                {
-                    _appliedOnce = true;
-                    return;
-                }
+                if (renderer.sprite == sprite) return;
 
                 renderer.sprite = sprite;
 

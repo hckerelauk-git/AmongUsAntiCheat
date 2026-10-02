@@ -64,13 +64,18 @@ namespace AmongUsAntiCheat.UI
                 new Vector2(-Margin, Margin + index * (CardHeight + Gap)),
                 new Vector2(CardWidth, CardHeight));
 
-            var bg = UiBuilder.CreateImage("Bg", go.transform, AceTheme.WindowBg);
+            var bg = UiBuilder.CreateImage("Bg", go.transform, Color.white);
+            bg.sprite = AceTheme.Card(10, 1, AceTheme.WindowBg, AceTheme.Border);
+            bg.type = Image.Type.Sliced;
             UiBuilder.Stretch(bg.rectTransform, 0f, 0f, 0f, 0f);
 
+            // 左侧强调条：圆角 + 上下留白，比贴边的直角长条精致
             var accent = UiBuilder.CreateImage("Accent", go.transform, AceTheme.Danger);
+            accent.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
+            accent.type = Image.Type.Sliced;
             UiBuilder.Place(accent.rectTransform,
                 new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                Vector2.zero, new Vector2(4f, CardHeight));
+                new Vector2(7f, 0f), new Vector2(4f, CardHeight - 18f));
 
             var title = UiBuilder.CreateText("Title", go.transform,
                 "", font, 13, AceTheme.TextMain, TextAnchor.UpperLeft, FontStyle.Bold);
