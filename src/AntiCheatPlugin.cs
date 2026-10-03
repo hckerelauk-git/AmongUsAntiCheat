@@ -65,12 +65,18 @@ namespace ApexCheatEnder
                       + $"自动踢人 {(cfg.AllowAutoKick.Value ? "开启" : "关闭")}。");
 
             // ---------- 补丁 ----------
+            _harmony = new Harmony(PluginGuid);
+            TryPatch(typeof(CanvasFramePatch), "帧驱动(Canvas)");
+            TryPatch(typeof(HudFramePatch), "帧驱动(HudManager)");
+            TryPatch(typeof(SplashFramePatch), "帧驱动(SplashManager)");
+            TryPatch(typeof(MainMenuArtStartPatch), "主菜单背景(Start)");
+            TryPatch(typeof(ChatNoticePatch), "本地聊天提示(AddChat)");
             if (cfg.EnableEventScan.Value)
                 ApplyPatches();
             else
-                Log.LogInfo("[初始化] 事件检测已关闭，跳过补丁挂载。");
+                Log.LogInfo("[初始化] 事件检测已关闭；界面与主菜单背景入口保持挂载。");
 
-            Log.LogInfo("Apex Cheat Ender 加载完成。按 F8 可切换监控面板。");
+            Log.LogInfo("Apex Cheat Ender 加载完成。按 Insert 打开设置。");
         }
 
         /// <summary>
@@ -79,14 +85,6 @@ namespace ApexCheatEnder
         /// </summary>
         private void ApplyPatches()
         {
-            _harmony = new Harmony(PluginGuid);
-
-            // 帧驱动必须最先挂载：它是整个检测循环与界面的心跳。
-            // 三个入口互为冗余，任一可用即可（详见 FrameDriverPatch）。
-            TryPatch(typeof(CanvasFramePatch), "帧驱动(Canvas)");
-            TryPatch(typeof(HudFramePatch), "帧驱动(HudManager)");
-            TryPatch(typeof(SplashFramePatch), "帧驱动(SplashManager)");
-
             TryPatch(typeof(MurderPlayerPatch), "击杀");
             TryPatch(typeof(CompleteTaskPatch), "任务完成");
             TryPatch(typeof(VentEnterPatch), "通风管");
@@ -107,12 +105,6 @@ namespace ApexCheatEnder
             TryPatch(typeof(BootFromVentPatch), "强制踢出通风管");
             TryPatch(typeof(ZiplinePatch), "滑索");
             TryPatch(typeof(OversizedPacketPatch), "超大数据包");
-
-            // ---------- 界面 ----------
-            // 主菜单背景替换：Start 首次应用，Update 低频巡检补刀
-            // （游戏切场景会重建背景对象，只挂 Start 会还原）。
-            TryPatch(typeof(MainMenuArtStartPatch), "主菜单背景(Start)");
-            TryPatch(typeof(MainMenuArtUpdatePatch), "主菜单背景(Update)");
 
             // RPC 洪水防护：唯一的 Prefix 补丁——它是唯一能在 RPC 执行前
             // 把包丢掉的一层，之前因为 TryPatch 只认 Postfix 而从未被挂载。

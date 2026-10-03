@@ -1,183 +1,169 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using ApexCheatEnder.Core;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace ApexCheatEnder.UI
 {
-    /// <summary>
-    /// 主菜单背景替换。
-    ///
-    /// 做法：把内嵌的图片解码成 Texture2D → Sprite，然后替换主菜单里那个
-    /// 背景 SpriteRenderer 的 sprite。不改任何预制体、不写盘，纯运行时替换。
-    ///
-    /// 为什么用内嵌资源而不是外部图片文件：
-    /// 插件的卖点就是「丢一个 dll 就能用」。要求用户额外拷贝一张图，
-    /// 就会出现「图丢了 → 背景变白」这种低级故障。
-    ///
-    /// 为什么要在 Update 里反复应用：
-    /// 游戏在切场景、开关菜单时会重建主菜单对象，替换过的 sprite 会被还原。
-    /// 所以除了首次应用，还需要低频巡检补刀（有节流，开销可忽略）。
-    /// </summary>
     internal static class MainMenuArt
     {
-        /// <summary>内嵌资源名（与 csproj 里的 LogicalName 一致）。</summary>
-        private const string ResourceName = "ApexCheatEnder.MainMenuArt.jpg";
+        private static readonly string[] ResourceNames =
+            { MenuArtSource.FirstResource, MenuArtSource.SecondResource, MenuArtSource.ThirdResource };
+        // 进程内只选一次；离开菜单、重新进入和卸载清理不重新抽图。
+        private static readonly int SelectedBackground = new System.Random().Next(MenuArtSource.BackgroundCount);
+        private static Texture2D _texture;
+        private static Transform _menuRoot;
+        private static SpriteRenderer _renderer;
+        private static Sprite _originalSprite;
+        private static SpriteDrawMode _originalDrawMode;
+        private static Vector2 _originalSize;
+        private static Sprite _appliedSprite;
+        private static float _lastAspect;
+        private static float _nextCheck;
+        private static bool _missingLogged;
 
-        /// <summary>背景对象可能的命名。按优先级排列。</summary>
-        private static readonly string[] BackgroundNames = { "Background", "BackgroundImage", "Bg" };
-
-        private static Sprite _sprite;
-        private static bool _loadFailed;
-        private static bool _logged;
-
-        /// <summary>巡检间隔（秒）。主菜单不需要每帧检查。</summary>
-        private const float RecheckInterval = 0.5f;
-        private static float _nextCheckTime;
-
-        /// <summary>
-        /// 把主菜单背景换成自定义图。由补丁在 Start / Update 里调用。
-        /// </summary>
-        /// <param name="menuRoot">主菜单根节点；为 null 时跳过。</param>
         public static void Apply(Transform menuRoot)
         {
             if (menuRoot == null) return;
-
-            // 节流放在最前面：本方法由 Update 补丁每帧调用，
-            // 配置读取和层级遍历都必须挡在节流之后，否则等于每帧白跑。
-            var now = Time.time;
-            if (now < _nextCheckTime) return;
-            _nextCheckTime = now + RecheckInterval;
-
-            if (!(AntiCheatRuntime.Config?.ShowMainMenuArt.Value ?? true)) return;
-
-            try
+            if (_menuRoot != menuRoot)
             {
-                var sprite = GetSprite();
-                if (sprite == null) return;
-
-                var renderer = FindBackgroundRenderer(menuRoot);
-                if (renderer == null) return;
-
-                // 已经是我们的图就不重复赋值（Sprite 比较是引用比较，很便宜）
-                if (renderer.sprite == sprite) return;
-
-                renderer.sprite = sprite;
-
-                if (!_logged)
-                {
-                    _logged = true;
-                    AntiCheatRuntime.Log?.LogInfo($"[主菜单] 背景已替换 -> {renderer.gameObject.name}");
-                }
+                Restore();
+                _menuRoot = menuRoot;
+                _nextCheck = 0f;
+                _missingLogged = false;
+                AntiCheatRuntime.Log?.LogInfo("[主菜单] Start 入口，场景=" + menuRoot.gameObject.scene.name +
+                    "，内置图片=" + ResourceNames[SelectedBackground]);
             }
-            catch (Exception ex)
-            {
-                if (!_logged)
-                {
-                    _logged = true;
-                    AntiCheatRuntime.Log?.LogWarning($"[主菜单] 替换背景失败：{ex.Message}");
-                }
-            }
+            Tick();
         }
 
-        /// <summary>把内嵌图片解码成 Sprite（只做一次，失败也不再重试）。</summary>
-        private static Sprite GetSprite()
+        // 由已有 Canvas 主线程帧入口驱动，不依赖游戏存在 Update。
+        public static void Tick()
         {
-            if (_sprite != null) return _sprite;
-            if (_loadFailed) return null;
-
+            if (_menuRoot == null || !_menuRoot.gameObject.activeInHierarchy ||
+                _menuRoot.gameObject.scene.handle != SceneManager.GetActiveScene().handle)
+            {
+                Restore();
+                _menuRoot = null;
+                return;
+            }
+            if (Time.unscaledTime < _nextCheck) return;
+            _nextCheck = Time.unscaledTime + 0.5f;
             try
             {
-                var asm = Assembly.GetExecutingAssembly();
-                using var stream = asm.GetManifestResourceStream(ResourceName);
-                if (stream == null)
+                var background = FindBackgroundRenderer(_menuRoot.gameObject.scene);
+                if (background != null && background.sprite != null)
                 {
-                    _loadFailed = true;
-                    AntiCheatRuntime.Log?.LogWarning(
-                        $"[主菜单] 找不到内嵌资源 {ResourceName}，跳过背景替换。");
-                    return null;
-                }
-
-                var bytes = new byte[stream.Length];
-                var read = 0;
-                while (read < bytes.Length)
-                {
-                    var n = stream.Read(bytes, read, bytes.Length - read);
-                    if (n <= 0) break;
-                    read += n;
-                }
-
-                // mipChain=false：背景是 2D 全屏绘制，不需要 mipmap，省显存。
-                var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
-                if (!tex.LoadImage(bytes))
-                {
-                    _loadFailed = true;
-                    AntiCheatRuntime.Log?.LogWarning("[主菜单] 图片解码失败，跳过背景替换。");
-                    return null;
-                }
-
-                tex.wrapMode = TextureWrapMode.Clamp;
-                tex.filterMode = FilterMode.Bilinear;
-
-                _sprite = Sprite.Create(
-                    tex,
-                    new Rect(0f, 0f, tex.width, tex.height),
-                    new Vector2(0.5f, 0.5f),
-                    100f);
-
-                AntiCheatRuntime.Log?.LogInfo($"[主菜单] 背景图已解码：{tex.width}x{tex.height}");
-                return _sprite;
-            }
-            catch (Exception ex)
-            {
-                _loadFailed = true;
-                AntiCheatRuntime.Log?.LogWarning($"[主菜单] 加载背景图异常：{ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// 在主菜单层级里找背景渲染器。
-        ///
-        /// 先按名字精确匹配；找不到就退回「层级里第一个 SpriteRenderer」——
-        /// 因为不同游戏版本背景对象的命名并不固定，宁可换个不那么准的，
-        /// 也好过什么都不做。
-        /// </summary>
-        private static SpriteRenderer FindBackgroundRenderer(Transform menuRoot)
-        {
-            SpriteRenderer firstAny = null;
-
-            var stack = new Stack<Transform>();
-            stack.Push(menuRoot);
-
-            // 限制遍历规模：主菜单层级不深，超过上限说明找错了根节点。
-            var guard = 0;
-            while (stack.Count > 0 && guard++ < 2000)
-            {
-                var t = stack.Pop();
-                if (t == null) continue;
-
-                var go = t.gameObject;
-                if (go != null)
-                {
-                    var sr = go.GetComponent<SpriteRenderer>();
-                    if (sr != null)
+                    if (_renderer != background)
                     {
-                        var n = go.name ?? string.Empty;
-                        foreach (var want in BackgroundNames)
-                        {
-                            if (n.Equals(want, StringComparison.OrdinalIgnoreCase)) return sr;
-                        }
-                        if (firstAny == null) firstAny = sr;
+                        Restore();
+                        _renderer = background;
+                        _originalSprite = background.sprite;
+                        _originalDrawMode = background.drawMode;
+                        _originalSize = background.size;
+                        AntiCheatRuntime.Log?.LogInfo("[主菜单] 命中原 Background：" + background.name);
                     }
+                    var size = _originalDrawMode == SpriteDrawMode.Simple
+                        ? new Vector2(_originalSprite.bounds.size.x, _originalSprite.bounds.size.y) : _originalSize;
+                    if (size.x <= 0f || size.y <= 0f) return;
+                    SetSprite(size, new Vector2(_originalSprite.pivot.x / _originalSprite.rect.width,
+                        _originalSprite.pivot.y / _originalSprite.rect.height));
+                    _renderer.drawMode = SpriteDrawMode.Simple;
+                    return;
                 }
 
-                var count = t.childCount;
-                for (var i = 0; i < count; i++) stack.Push(t.GetChild(i));
+                // 日志与参考只证明菜单入口及旧版世界坐标，不能证明当前场景安全的后景排序。
+                // 未命中明确 Background 时不创建后景，避免局部坐标、排序层和其他相机覆盖风险。
+                Restore();
+                if (!_missingLogged)
+                {
+                    _missingLogged = true;
+                    AntiCheatRuntime.Log?.LogWarning("[主菜单] 未找到明确 Background，无法确认安全后景位置，保留原菜单并等待后续检查。");
+                }
+                return;
             }
+            catch (Exception ex)
+            {
+                Restore();
+                AntiCheatRuntime.Log?.LogWarning("[主菜单] 背景应用失败，已恢复：" + ex.Message);
+            }
+        }
 
-            return firstAny;
+        private static void SetSprite(Vector2 size, Vector2 pivot)
+        {
+            if (_texture == null)
+            {
+                using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceNames[SelectedBackground]);
+                if (stream == null) throw new InvalidDataException("缺少内嵌背景资源。");
+                using var output = new MemoryStream();
+                stream.CopyTo(output);
+                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (!texture.LoadImage(output.ToArray()))
+                {
+                    UnityEngine.Object.Destroy(texture);
+                    throw new InvalidDataException("内嵌图片解码失败。");
+                }
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.filterMode = FilterMode.Bilinear;
+                _texture = texture;
+            }
+            var aspect = size.x / size.y;
+            if (_appliedSprite == null || Mathf.Abs(aspect - _lastAspect) > 0.0001f ||
+                Mathf.Abs(_appliedSprite.bounds.size.x - size.x) > 0.0001f)
+            {
+                var crop = MenuArtSource.Crop(_texture.width, _texture.height, aspect);
+                var previous = _appliedSprite;
+                _appliedSprite = Sprite.Create(_texture, new Rect(crop.X, crop.Y, crop.Width, crop.Height),
+                    pivot, crop.Width / size.x, 0, SpriteMeshType.FullRect);
+                _lastAspect = aspect;
+                _renderer.sprite = _appliedSprite;
+                if (previous != null) UnityEngine.Object.Destroy(previous);
+            }
+            _renderer.sprite = _appliedSprite;
+        }
+
+        private static SpriteRenderer FindBackgroundRenderer(Scene scene)
+        {
+            // Background 可以是场景根或 Camera 的子节点，不限定菜单直属路径。
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                if (!root.activeInHierarchy) continue;
+                if (root.name == "Background")
+                {
+                    var renderer = root.GetComponent<SpriteRenderer>();
+                    if (renderer != null && renderer.enabled) return renderer;
+                }
+                if (root.GetComponent<Camera>() == null && root.transform != _menuRoot.root) continue;
+                foreach (var renderer in root.GetComponentsInChildren<SpriteRenderer>(true))
+                    if (renderer.name == "Background" && renderer.enabled && renderer.gameObject.activeInHierarchy)
+                        return renderer;
+            }
+            return null;
+        }
+
+        private static void Restore()
+        {
+            if (_renderer != null)
+            {
+                _renderer.sprite = _originalSprite;
+                _renderer.drawMode = _originalDrawMode;
+                _renderer.size = _originalSize;
+            }
+            _renderer = null;
+            _originalSprite = null;
+            if (_appliedSprite != null) UnityEngine.Object.Destroy(_appliedSprite);
+            _appliedSprite = null;
+        }
+
+        public static void Shutdown()
+        {
+            Restore();
+            if (_texture != null) UnityEngine.Object.Destroy(_texture);
+            _texture = null;
+            _menuRoot = null;
+            _nextCheck = 0f;
         }
     }
 }

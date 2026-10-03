@@ -92,7 +92,7 @@ namespace ApexCheatEnder.UI
                 var root = EnsureCanvas();
                 if (root == null) return;
 
-                MonitorPanel.EnsureBuilt(root);
+                MainMenuArt.Tick();
                 SettingsWindow.EnsureBuilt(root);
                 NotificationPanel.EnsureBuilt(root);
 
@@ -115,12 +115,9 @@ namespace ApexCheatEnder.UI
                     }
                 }
 
-                MonitorPanel.Tick();
                 SettingsWindow.Tick(Input.GetKeyDown(KeyCode.Insert));
                 NotificationPanel.Tick();
-
-                // F8 切换监控面板
-                if (Input.GetKeyDown(KeyCode.F8)) MonitorPanel.Toggle();
+                ChatAbuseNotice.Tick(root);
 
                 if (!_firstFrameLogged)
                 {

@@ -8,16 +8,7 @@ using UnityEngine.UI;
 namespace ApexCheatEnder.UI
 {
     /// <summary>
-    /// 设置界面。
-    ///
-    /// 重写的四条理由（来自实际使用反馈）：
-    ///   1. 页签名字全是术语，用户不知道点进去会看到什么
-    ///   2. 每行只有个名字，改了会发生什么全靠猜
-    ///   3. AI 那页有三个供应商循环切换、地址模型密钥三样都要填
-    ///   4. 改完还得重启游戏才生效
-    ///
-    /// 对应的改法：页签换成大白话、每行下面配一句人话说明、
-    /// AI 只留一个供应商且用户只需填密钥、改完立刻生效并在底部提示。
+    /// 设置界面：标题栏拖动，内容区域滚动，改动实时保存。
     ///
     /// 交互不使用 uGUI 的 Button/Toggle：它们的 onClick 要往 il2cpp
     /// 事件上挂托管委托，在动态注册的类型上不稳。这里每帧读鼠标位置，
@@ -25,17 +16,11 @@ namespace ApexCheatEnder.UI
     /// </summary>
     internal static class SettingsWindow
     {
-        private const float WindowWidth = 1080f;
-        private const float WindowHeight = 700f;
+        private const float WindowWidth = 800f;
+        private const float WindowHeight = 560f;
         private const float TitleBarHeight = 64f;
-        private const float TabColumnWidth = 220f;
+        private const float TabColumnWidth = 170f;
         private const float FooterHeight = 46f;
-        /// <summary>
-        /// 单行高度。一行要放下「标题 + 说明」两段文字，58px 太挤：
-        /// 标题 20px 紧贴说明 18px，再叠上不同分辨率下的字体缩放就会出现
-        /// 视觉重叠。放宽到 74px，两段文字之间留出明显间隙。
-        /// </summary>
-        private const float RowHeight = 74f;
         private const float ContentPadding = 28f;
 
         // ================= 开关控件尺寸 =================
@@ -52,12 +37,6 @@ namespace ApexCheatEnder.UI
         /// <summary>窗口圆角半径（与监控面板同一套 9 宫格卡片）。</summary>
         private const int WindowRadius = 16;
 
-        /// <summary>行底板圆角半径。</summary>
-        private const int RowRadius = 8;
-
-        /// <summary>内容区顶部的起始偏移（给页标题与页说明留位置）。</summary>
-        private const float ContentTopOffset = 58f;
-
         /// <summary>内容区底部留白，避免最后一行贴住 footer。</summary>
         private const float ContentBottomPadding = 12f;
 
@@ -66,6 +45,7 @@ namespace ApexCheatEnder.UI
         private static bool _built;
         private static bool _visible;
         private static GameObject _root;
+        private static RectTransform _tabArea;
         private static RectTransform _contentArea;
 
         /// <summary>
@@ -101,8 +81,27 @@ namespace ApexCheatEnder.UI
         private static readonly List<TabEntry> Tabs = new List<TabEntry>();
         private static readonly List<RowEntry> Rows = new List<RowEntry>();
 
-        /// <summary>密钥输入控件，只在 AI 页存在。</summary>
-        private static TextInputField _keyInput;
+        private static readonly List<GameObject> Cards = new List<GameObject>();
+        private static readonly List<RowEntry> CardHeaders = new List<RowEntry>();
+        private static readonly List<TabEntry> SubTabs = new List<TabEntry>();
+        private static readonly HashSet<string> CollapsedCards = new HashSet<string>();
+        private static readonly int[] SelectedSubTabs = new int[6];
+        private static readonly DoubleClickConfirmation RestoreConfirmation = new DoubleClickConfirmation();
+        private static string _exportStatus = "点击导出";
+        private static string _selectedDetail;
+        private static int _historyPage;
+        private static int _historyGroup;
+        private static int _preset;
+        private static RectTransform _subTabArea;
+        private static RowEntry _activeSlider;
+        private static readonly List<TextInputField> TextInputs = new List<TextInputField>();
+        private static RectTransform _windowRect;
+        private static RectTransform _titleRect;
+        private static bool _windowDragging;
+        private static bool _scrollDragging;
+        private static bool _gestureMoved;
+        private static Vector2 _dragStart;
+        private static Vector2 _windowStart;
 
         /// <summary>底部「已保存」提示的显示截止时刻。</summary>
         private static float _savedFlashUntil;
@@ -125,6 +124,9 @@ namespace ApexCheatEnder.UI
             public Text Value;
             public RectTransform MinusRect;
             public RectTransform PlusRect;
+            public RectTransform SliderRect;
+            public RectTransform SliderFill;
+            public RectTransform SliderKnob;
 
             /// <summary>开关行的轨道底板（仅 Toggle 行有）。</summary>
             public Image SwitchTrack;
@@ -143,6 +145,12 @@ namespace ApexCheatEnder.UI
             public string Hint;
             public RowKind Kind;
             public Func<string> GetValue;
+            public float Min;
+            public float Max;
+            public float Step;
+            public bool Integer;
+            public Func<float> ReadNumber;
+            public Action<float> WriteNumber;
 
             /// <summary>
             /// 开关行的当前状态（仅 Toggle 行提供）。
@@ -160,12 +168,12 @@ namespace ApexCheatEnder.UI
 
         private static readonly string[] TabNames =
         {
-            "开着什么",
-            "跑多快算作弊",
-            "抓到怎么办",
-            "爬管道",
-            "AI 帮忙看",
+            "常规",
+            "行为检测",
+            "处置规则",
+            "网络防护",
             "关于",
+            "记录与工具",
         };
 
         /// <summary>
@@ -179,18 +187,18 @@ namespace ApexCheatEnder.UI
             AceTheme.GlyphShape.Triangle,   // 跑多快算作弊：速度
             AceTheme.GlyphShape.Diamond,    // 抓到怎么办：处置
             AceTheme.GlyphShape.Circle,     // 爬管道：管道口
-            AceTheme.GlyphShape.Ring,       // AI 帮忙看：智能
             AceTheme.GlyphShape.Bars,       // 关于：条目
+            AceTheme.GlyphShape.Bars,
         };
 
         private static readonly string[] TabHints =
         {
             "总开关和界面显示。一般不用改。",
-            "判定跑太快、瞬移的松紧程度。被误判了就往松了调。",
+            "按移动、击杀任务、会议聊天分类调整检测阈值。",
             "抓到人之后怎么处置，命中的规则怎么记。",
             "检查爬通风管、滑索、刷数据包这类动作。",
-            "让大模型帮忙复核命中的规则。只需要填一把密钥。",
             "版本信息和快捷键。",
+            "本地事件、风险详情、阈值预设和脱敏诊断；不上传数据。",
         };
 
         // ================= 构建 =================
@@ -204,6 +212,11 @@ namespace ApexCheatEnder.UI
 
             _root = UiBuilder.CreateNode("AceSettings", canvasRoot);
             var rootRect = _root.GetComponent<RectTransform>();
+            _windowRect = rootRect;
+            var titleNode = UiBuilder.CreateNode("DragTitleBar", _root.transform);
+            _titleRect = titleNode.GetComponent<RectTransform>();
+            UiBuilder.Place(_titleRect, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                Vector2.zero, new Vector2(WindowWidth, TitleBarHeight));
             UiBuilder.Place(rootRect,
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
                 Vector2.zero, new Vector2(WindowWidth, WindowHeight));
@@ -229,19 +242,19 @@ namespace ApexCheatEnder.UI
             UiBuilder.Place(shield.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(18f, -18f), new Vector2(32f, 32f));
 
-            var title = UiBuilder.CreateText("Title", _root.transform,
+            var title = CreateText("Title", _root.transform,
                 "APEX CHEAT ENDER", font, 16, AceTheme.TextMain, TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(62f, -17f), new Vector2(320f, 26f));
 
             // 这句是普通说明，不是「操作成功」的状态提示，用绿色（Success）会
             // 让人以为刚刚发生了什么。改用次要文字色。
-            var subtitle = UiBuilder.CreateText("SubTitle", _root.transform,
-                "改动立刻生效，不用重启游戏", font, 11, AceTheme.TextDim);
+            var subtitle = CreateText("SubTitle", _root.transform,
+                "设置", font, 11, AceTheme.TextDim);
             UiBuilder.Place(subtitle.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(250f, -20f), new Vector2(340f, 20f));
+                new Vector2(62f, -40f), new Vector2(340f, 18f));
 
-            var hint = UiBuilder.CreateText("Hint", _root.transform,
+            var hint = CreateText("Hint", _root.transform,
                 "Insert 关闭", font, 11, AceTheme.TextDim, TextAnchor.UpperRight);
             UiBuilder.Place(hint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(WindowWidth - 180f, -20f), new Vector2(160f, 20f));
@@ -251,27 +264,35 @@ namespace ApexCheatEnder.UI
                 new Vector2(0f, -TitleBarHeight), new Vector2(WindowWidth, 1f));
 
             // ---- 左侧页签栏 ----
+            // 导航必须是窗口直属层，不能挂在 viewport/content 的父级上。
+            // 旧层级会让页签与滚动裁剪层发生层级竞争，表现为截图里的「空侧栏」。
+            var tabAreaNode = UiBuilder.CreateNode("TabArea", _root.transform);
+            _tabArea = tabAreaNode.GetComponent<RectTransform>();
+            UiBuilder.Place(_tabArea, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(0f, (FooterHeight - TitleBarHeight) / 2f),
+                new Vector2(TabColumnWidth, WindowHeight - TitleBarHeight - FooterHeight));
+
             var tabBg = UiBuilder.CreateImage("TabBg", _root.transform, AceTheme.TabColumnBg);
             UiBuilder.Place(tabBg.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(0f, -(FooterHeight / 2f) + (TitleBarHeight / 2f)),
+                new Vector2(0f, (FooterHeight - TitleBarHeight) / 2f),
                 new Vector2(TabColumnWidth, WindowHeight - TitleBarHeight - FooterHeight));
 
             var divLeft = UiBuilder.CreateImage("DivLeft", _root.transform, AceTheme.Border);
             UiBuilder.Place(divLeft.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(TabColumnWidth, -(FooterHeight / 2f) + (TitleBarHeight / 2f)),
+                new Vector2(TabColumnWidth, (FooterHeight - TitleBarHeight) / 2f),
                 new Vector2(1f, WindowHeight - TitleBarHeight - FooterHeight));
 
             // ---- 页标题与页说明：固定在窗口上，不随内容滚动 ----
             var textLeft = TabColumnWidth + ContentPadding;
-            _pageTitleText = UiBuilder.CreateText("PageTitle", _root.transform,
+            _pageTitleText = CreateText("PageTitle", _root.transform,
                 "", font, 15, AceTheme.Accent, TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(_pageTitleText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(textLeft, -TitleBarHeight - 10f), new Vector2(500f, 22f));
 
-            _pageHintText = UiBuilder.CreateText("PageHint", _root.transform,
+            _pageHintText = CreateText("PageHint", _root.transform,
                 "", font, 11, AceTheme.TextDim, TextAnchor.UpperLeft);
             UiBuilder.Place(_pageHintText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(textLeft, -TitleBarHeight - 32f), new Vector2(760f, 18f));
+                new Vector2(textLeft, -TitleBarHeight - 32f), new Vector2(WindowWidth - textLeft - ContentPadding, 24f));
 
             // ---- 滚动视口：裁剪 + 承载行内容 ----
             // 设置项最多的一页有 14 行（需 870px），而可用高度只有约 520px。
@@ -279,9 +300,13 @@ namespace ApexCheatEnder.UI
             var viewportNode = UiBuilder.CreateNode("Viewport", _root.transform);
             _viewport = viewportNode.GetComponent<RectTransform>();
             var vpW = WindowWidth - TabColumnWidth - ContentPadding * 2f;
-            var vpH = WindowHeight - TitleBarHeight - 60f - FooterHeight - ContentBottomPadding;
+            var subNode = UiBuilder.CreateNode("SubTabs", _root.transform);
+            _subTabArea = subNode.GetComponent<RectTransform>();
+            UiBuilder.Place(_subTabArea, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(textLeft, -TitleBarHeight - 60f), new Vector2(vpW, 30f));
+            var vpH = WindowHeight - TitleBarHeight - 96f - FooterHeight - ContentBottomPadding;
             UiBuilder.Place(_viewport, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(textLeft, -TitleBarHeight - 60f), new Vector2(vpW, vpH));
+                new Vector2(textLeft, -TitleBarHeight - 96f), new Vector2(vpW, vpH));
             _viewportHeight = vpH;
             viewportNode.AddComponent<RectMask2D>();
 
@@ -298,7 +323,7 @@ namespace ApexCheatEnder.UI
             UiBuilder.Place(divBottom.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(0f, FooterHeight), new Vector2(WindowWidth, 1f));
 
-            _footerText = UiBuilder.CreateText("Footer", _root.transform,
+            _footerText = CreateText("Footer", _root.transform,
                 "", font, 11, AceTheme.TextDim);
             UiBuilder.Place(_footerText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(18f, 10f), new Vector2(WindowWidth - 36f, 20f));
@@ -309,6 +334,8 @@ namespace ApexCheatEnder.UI
             UiBuilder.Place(statusBar.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(10f, 10f), new Vector2(WindowWidth - 20f, 3f));
 
+            // 导航置于固定背景之后，且完全脱离 RectMask2D。
+            tabAreaNode.transform.SetAsLastSibling();
             BuildTabs(font);
             SwitchPage(0);
 
@@ -322,10 +349,10 @@ namespace ApexCheatEnder.UI
             for (var i = 0; i < TabNames.Length; i++)
             {
                 var index = i;
-                var node = UiBuilder.CreateNode("Tab" + i, _contentArea.parent);
+                var node = UiBuilder.CreateNode("Tab" + i, _tabArea);
                 var rect = node.GetComponent<RectTransform>();
                 UiBuilder.Place(rect, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(14f, -TitleBarHeight - 20f - i * TabSpacing),
+                    new Vector2(14f, -20f - i * TabSpacing),
                     new Vector2(TabColumnWidth - 28f, TabHeight));
 
                 var bg = node.AddComponent<Image>();
@@ -349,7 +376,7 @@ namespace ApexCheatEnder.UI
                 UiBuilder.Place(glyph.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                     new Vector2(20f, 0f), new Vector2(18f, 18f));
 
-                var label = UiBuilder.CreateText("TabLabel" + i, node.transform,
+                var label = CreateText("TabLabel" + i, node.transform,
                     TabNames[i], font, 13, AceTheme.TextDim, TextAnchor.MiddleLeft);
                 UiBuilder.Place(label.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                     new Vector2(48f, 0f), new Vector2(TabColumnWidth - 78f, 26f));
@@ -370,6 +397,7 @@ namespace ApexCheatEnder.UI
 
         private static void SwitchPage(int index)
         {
+            RestoreConfirmation.Cancel();
             _currentPage = index;
             _pageTitleText.text = TabNames[index];
             if (_pageHintText != null) _pageHintText.text = TabHints[index];
@@ -393,17 +421,48 @@ namespace ApexCheatEnder.UI
                     Tabs[i].Glyph.color = selected ? AceTheme.Primary : AceTheme.TextDim;
             }
 
+            BuildSubTabs(index);
             BuildRows(index);
+        }
+
+        private static void BuildSubTabs(int page)
+        {
+            foreach (var tab in SubTabs)
+            {
+                tab.Rect.gameObject.SetActive(false);
+                UnityEngine.Object.Destroy(tab.Rect.gameObject);
+            }
+            SubTabs.Clear();
+            var names = page == 1 ? new[] { "移动", "击杀 / 任务", "会议 / 聊天" }
+                : page == 5 ? new[] { "记录与工具" } : new[] { "全部设置" };
+            var width = (WindowWidth - TabColumnWidth - ContentPadding * 2f - (names.Length - 1) * 6f) / names.Length;
+            for (var i = 0; i < names.Length; i++)
+            {
+                var image = UiBuilder.CreateImage("SubTab" + i, _subTabArea, i == SelectedSubTabs[page] ? AceTheme.TabActiveBg : AceTheme.RowBgA);
+                UiBuilder.Place(image.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(i * (width + 6f), 0f), new Vector2(width, 30f));
+                var text = CreateText("Label", image.transform, names[i], UiBuilder.LoadFont(13), 12,
+                    i == SelectedSubTabs[page] ? AceTheme.Accent : AceTheme.TextDim, TextAnchor.MiddleCenter);
+                UiBuilder.Stretch(text.rectTransform, 4f, 4f, 0f, 0f);
+                SubTabs.Add(new TabEntry { Index = i, Rect = image.rectTransform });
+            }
         }
 
         // ================= 行构建 =================
 
         private static void BuildRows(int page)
         {
-            foreach (var row in Rows)
-                if (row.Rect != null) UnityEngine.Object.Destroy(row.Rect.gameObject);
+            _activeSlider = null;
+            _pressArmed = _scrollDragging = false;
+            foreach (var card in Cards)
+            {
+                card.SetActive(false);
+                UnityEngine.Object.Destroy(card);
+            }
+            Cards.Clear();
+            CardHeaders.Clear();
             Rows.Clear();
-            _keyInput = null;
+            TextInputs.Clear();
 
             // 换页回到顶部：否则会停留在上一页的滚动位置，看起来像"内容没了"
             _scrollOffset = 0f;
@@ -413,28 +472,60 @@ namespace ApexCheatEnder.UI
             var font = UiBuilder.LoadFont(13);
             var contentWidth = WindowWidth - TabColumnWidth - ContentPadding * 2f;
 
-            // 内容高度决定能滚多远。行数多的一页（14 行）会显著超出视口高度。
-            _contentHeight = model.Count * RowHeight + ContentBottomPadding;
-            if (_contentArea != null)
-            {
-                _contentArea.sizeDelta = new Vector2(0f, Mathf.Max(_contentHeight, _viewportHeight));
-                _contentArea.anchoredPosition = Vector2.zero;
-            }
-
+            var cursor = 0f;
+            var group = -1;
+            RectTransform cardBody = null;
+            var bodyCursor = 38f;
+            var collapsed = false;
             for (var i = 0; i < model.Count; i++)
             {
                 var row = model[i];
-                // 从内容区顶部开始排（内容区已锚在视口顶部，滚动靠移动它实现）
-                var y = -i * RowHeight;
-
-                var node = UiBuilder.CreateNode("Row" + i, _contentArea);
+                var rowGroup = SettingsLayout.Group(page, i);
+                if (page == 1 && rowGroup != SelectedSubTabs[page]) continue;
+                if (group != rowGroup)
+                {
+                    group = rowGroup;
+                    var key = page + ":" + group;
+                    collapsed = CollapsedCards.Contains(key);
+                    var bodyHeight = 0f;
+                    for (var j = i; j < model.Count && SettingsLayout.Group(page, j) == group; j++)
+                        bodyHeight += SettingsLayout.RowHeight(model[j].Kind == RowKind.Number);
+                    var height = SettingsLayout.CardHeight(bodyHeight, collapsed);
+                    var card = UiBuilder.CreateImage("Group" + group, _contentArea, Color.white);
+                    card.sprite = AceTheme.Card(8, 1, AceTheme.RowBgA, AceTheme.RowBorder);
+                    card.type = Image.Type.Sliced;
+                    UiBuilder.Place(card.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                        new Vector2(0f, -cursor), new Vector2(contentWidth, height));
+                    Cards.Add(card.gameObject);
+                    cardBody = card.rectTransform;
+                    var header = CreateText("GroupTitle", card.transform,
+                        (collapsed ? ">  " : "v  ") + (page < SettingsLayout.GroupNames.Length ? SettingsLayout.GroupNames[page][group] : "本地记录与工具"), font, 13, AceTheme.Accent,
+                        TextAnchor.MiddleLeft, FontStyle.Bold);
+                    UiBuilder.Place(header.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                        new Vector2(14f, 0f), new Vector2(contentWidth - 28f, 38f));
+                    CardHeaders.Add(new RowEntry { Rect = header.rectTransform, Model = new SettingRow
+                    {
+                        OnToggle = () =>
+                        {
+                            if (!CollapsedCards.Add(key)) CollapsedCards.Remove(key);
+                            BuildRows(page);
+                        }
+                    } });
+                    cursor += height + 10f;
+                    bodyCursor = 38f;
+                }
+                if (collapsed) continue;
+                var rowHeight = SettingsLayout.RowHeight(row.Kind == RowKind.Number);
+                var y = -bodyCursor;
+                bodyCursor += rowHeight;
+                var node = UiBuilder.CreateNode("Row" + i, cardBody);
                 var rect = node.GetComponent<RectTransform>();
                 UiBuilder.Place(rect, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(0f, y), new Vector2(contentWidth, RowHeight - 6f));
+                    new Vector2(0f, y), new Vector2(contentWidth, rowHeight - 4f));
 
                 // 圆角行底板 + 斑马纹
                 var bg = node.AddComponent<Image>();
-                bg.sprite = AceTheme.Card(RowRadius, 1,
+                bg.sprite = AceTheme.Card(3, 0,
                     i % 2 == 0 ? AceTheme.RowBgA : AceTheme.RowBgB,
                     AceTheme.RowBorder);
                 bg.type = Image.Type.Sliced;
@@ -442,70 +533,61 @@ namespace ApexCheatEnder.UI
 
                 // 标题与说明之间留 4px 间隙：说明字号更小、颜色更暗，
                 // 靠「字号 + 灰度 + 间距」三重区分层级，不再靠挤在一起
-                var label = UiBuilder.CreateText("RowLabel" + i, node.transform,
+                var label = CreateText("RowLabel" + i, node.transform,
                     row.Label, font, 13, AceTheme.TextMain, TextAnchor.UpperLeft);
                 UiBuilder.Place(label.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(16f, -10f), new Vector2(460f, 22f));
+                    new Vector2(16f, -8f), new Vector2(contentWidth - (row.Kind == RowKind.TextField ? 290f : row.Kind == RowKind.Info || row.Kind == RowKind.Action ? 150f : 100f), 20f));
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.verticalOverflow = VerticalWrapMode.Truncate;
+                label.supportRichText = false;
 
-                var hint = UiBuilder.CreateText("RowHint" + i, node.transform,
+                var hint = CreateText("RowHint" + i, node.transform,
                     row.Hint ?? string.Empty, font, 11, AceTheme.TextDim, TextAnchor.UpperLeft);
                 UiBuilder.Place(hint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(16f, -36f), new Vector2(contentWidth - 32f, 20f));
+                    new Vector2(16f, -29f), new Vector2(contentWidth - (row.Kind == RowKind.TextField ? 290f : row.Kind == RowKind.Info || row.Kind == RowKind.Action ? 150f : 100f), 26f));
+                hint.horizontalOverflow = HorizontalWrapMode.Wrap;
+                hint.verticalOverflow = VerticalWrapMode.Truncate;
+                hint.supportRichText = false;
 
                 if (row.Kind == RowKind.TextField)
                 {
                     // 密钥行：右侧挂一个真正的输入控件。
                     var hostNode = UiBuilder.CreateNode("InputHost", node.transform);
                     var hostRect = hostNode.GetComponent<RectTransform>();
-                    UiBuilder.Place(hostRect, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                        new Vector2(-16f, -6f), new Vector2(260f, 30f));
+                        UiBuilder.Place(hostRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                        new Vector2(-16f, 0f), new Vector2(260f, 30f));
 
-                    _keyInput = new TextInputField(hostRect, row.GetText, row.SetText, true, "点这里输入密钥");
+                    TextInputs.Add(new TextInputField(hostRect, row.GetText, row.SetText, false, "点这里输入文字"));
                     Rows.Add(new RowEntry { Model = row, Rect = rect, Background = bg });
                     continue;
                 }
 
                 if (row.Kind == RowKind.Number)
                 {
-                    // 数字行使用三个独立区域：减号 / 当前值 / 加号。
-                    // 不再通过整行左右半边猜测，避免用户点减号却触发加号。
-                    var minus = UiBuilder.CreateNode("Minus", node.transform);
-                    var minusRect = minus.GetComponent<RectTransform>();
-                    UiBuilder.Place(minusRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                        new Vector2(-196f, 0f), new Vector2(34f, 30f));
-                    var minusBg = minus.AddComponent<Image>();
-                    minusBg.sprite = AceTheme.Card(6, 0, AceTheme.BtnMinusBg, AceTheme.BtnMinusBg);
-                    minusBg.type = Image.Type.Sliced;
-                    minusBg.raycastTarget = false;
-                    var minusText = UiBuilder.CreateText("MinusText", minus.transform,
-                        "−", font, 18, AceTheme.TextMain, TextAnchor.MiddleCenter, FontStyle.Bold);
-                    UiBuilder.Stretch(minusText.rectTransform, 0f, 0f, 0f, 0f);
-
-                    var value = UiBuilder.CreateText("RowValue" + i, node.transform,
-                        "", font, 13, AceTheme.Accent, TextAnchor.MiddleCenter, FontStyle.Bold);
-                    UiBuilder.Place(value.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                        new Vector2(-136f, 0f), new Vector2(82f, 30f));
-
-                    var plus = UiBuilder.CreateNode("Plus", node.transform);
-                    var plusRect = plus.GetComponent<RectTransform>();
-                    UiBuilder.Place(plusRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                        new Vector2(-78f, 0f), new Vector2(34f, 30f));
-                    var plusBg = plus.AddComponent<Image>();
-                    plusBg.sprite = AceTheme.Card(6, 0, AceTheme.BtnPlusBg, AceTheme.BtnPlusBg);
-                    plusBg.type = Image.Type.Sliced;
-                    plusBg.raycastTarget = false;
-                    var plusText = UiBuilder.CreateText("PlusText", plus.transform,
-                        "+", font, 18, AceTheme.TextMain, TextAnchor.MiddleCenter, FontStyle.Bold);
-                    UiBuilder.Stretch(plusText.rectTransform, 0f, 0f, 0f, 0f);
-
+                    var value = CreateText("RowValue" + i, node.transform,
+                        "", font, 13, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
+                    UiBuilder.Place(value.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                        new Vector2(-16f, -8f), new Vector2(76f, 20f));
+                    var inset = row.Integer ? 52f : 22f;
+                    var slider = UiBuilder.CreateNode("SliderHit", node.transform).GetComponent<RectTransform>();
+                    UiBuilder.Place(slider, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                        new Vector2(inset, -58f), new Vector2(contentWidth - inset * 2f, 24f));
+                    var track = UiBuilder.CreateImage("Track", slider, AceTheme.SwitchOff);
+                    UiBuilder.Place(track.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                        Vector2.zero, new Vector2(contentWidth - inset * 2f, 6f));
+                    var fill = UiBuilder.CreateImage("Fill", slider, AceTheme.Accent);
+                    UiBuilder.Place(fill.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                        Vector2.zero, new Vector2(0f, 6f));
+                    var knob = UiBuilder.CreateImage("SliderKnob", slider, AceTheme.SwitchKnob);
+                    knob.sprite = AceTheme.Dot(14, Color.white);
+                    UiBuilder.Place(knob.rectTransform, new Vector2(0f, 0.5f), new Vector2(0.5f, 0.5f),
+                        Vector2.zero, new Vector2(14f, 14f));
                     Rows.Add(new RowEntry
                     {
-                        Model = row,
-                        Rect = rect,
-                        Background = bg,
-                        Value = value,
-                        MinusRect = minusRect,
-                        PlusRect = plusRect,
+                        Model = row, Rect = rect, Background = bg, Value = value,
+                        SliderRect = slider, SliderFill = fill.rectTransform, SliderKnob = knob.rectTransform,
+                        MinusRect = row.Integer ? BuildArrow(node.transform, font, 14f, "<", AceTheme.BtnMinusBg) : null,
+                        PlusRect = row.Integer ? BuildArrow(node.transform, font, contentWidth - 38f, ">", AceTheme.BtnPlusBg) : null,
                     });
                     continue;
                 }
@@ -517,7 +599,7 @@ namespace ApexCheatEnder.UI
                     var swNode = UiBuilder.CreateNode("Switch", node.transform);
                     var swRect = swNode.GetComponent<RectTransform>();
                     UiBuilder.Place(swRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                        new Vector2(-18f, 0f), new Vector2(52f, 26f));
+                        new Vector2(-18f, -2f), new Vector2(52f, 26f));
 
                     // 贴图一律用白色，状态色交给 Image.color。
                     // 若把底色烤进贴图，Image.color 会与之相乘：
@@ -547,10 +629,10 @@ namespace ApexCheatEnder.UI
                     continue;
                 }
 
-                var normalValue = UiBuilder.CreateText("RowValue" + i, node.transform,
+                var normalValue = CreateText("RowValue" + i, node.transform,
                     "", font, 13, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
                 UiBuilder.Place(normalValue.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                    new Vector2(-16f, 0f), new Vector2(300f, 30f));
+                    new Vector2(-16f, 0f), new Vector2(110f, 30f));
                 Rows.Add(new RowEntry
                 {
                     Model = row,
@@ -560,7 +642,30 @@ namespace ApexCheatEnder.UI
                 });
             }
 
+            _contentHeight = cursor + ContentBottomPadding;
+            _contentArea.sizeDelta = new Vector2(0f, Mathf.Max(_contentHeight, _viewportHeight));
+            _contentArea.anchoredPosition = Vector2.zero;
             RefreshRowValues();
+        }
+
+        private static Text CreateText(string name, Transform parent, string content, Font font, int size,
+            Color color, TextAnchor anchor = TextAnchor.UpperLeft, FontStyle style = FontStyle.Normal)
+        {
+            var text = UiBuilder.CreateText(name, parent, content, font, size, color, anchor, style);
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+            text.supportRichText = false;
+            return text;
+        }
+
+        private static RectTransform BuildArrow(Transform parent, Font font, float x, string label, Color color)
+        {
+            var image = UiBuilder.CreateImage("Arrow", parent, color);
+            UiBuilder.Place(image.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(x, -58f), new Vector2(24f, 24f));
+            var text = CreateText("Label", image.transform, label, font, 14, AceTheme.TextMain, TextAnchor.MiddleCenter);
+            UiBuilder.Stretch(text.rectTransform, 0f, 0f, 0f, 0f);
+            return image.rectTransform;
         }
 
         private static void RefreshRowValues()
@@ -589,6 +694,13 @@ namespace ApexCheatEnder.UI
                     continue;
                 }
 
+                if (row.SliderRect != null)
+                {
+                    var fraction = SettingsLayout.Normalize(row.Model.ReadNumber(), row.Model.Min, row.Model.Max);
+                    var width = row.SliderRect.rect.width;
+                    row.SliderFill.sizeDelta = new Vector2(width * fraction, 6f);
+                    row.SliderKnob.anchoredPosition = new Vector2(width * fraction, 0f);
+                }
                 if (row.Model.GetValue == null || row.Value == null) continue;
                 var text = row.Model.GetValue();
                 row.Value.text = text;
@@ -622,7 +734,7 @@ namespace ApexCheatEnder.UI
                 case 1: return BuildMovementPage(cfg);
                 case 2: return BuildDispositionPage(cfg);
                 case 3: return BuildVentPage(cfg);
-                case 4: return BuildAiPage();
+                case 5: return BuildToolsPage(cfg);
                 default: return BuildAboutPage();
             }
         }
@@ -639,14 +751,10 @@ namespace ApexCheatEnder.UI
                 "检查击杀、爬管道这些动作在当前状态下能不能做。"));
             list.Add(Toggle("检测穿墙", cfg.EnableWallClipCheck,
                 "会额外吃一点性能，网络卡时容易误判。认准作弊用上面那几项就够。"));
-            list.Add(Toggle("右上角监控面板", cfg.ShowOverlay,
-                "一直显示防护状态和规则命中排行。游戏中按 F8 可以临时关掉。"));
             list.Add(Toggle("顶部弹出提醒", cfg.ShowNotifications,
                 "命中检测规则时在屏幕上方弹一条通知。"));
             list.Add(Toggle("开机启动动画", cfg.ShowDesktopSplash,
                 "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
-            list.Add(Toggle("自定义主菜单背景", cfg.ShowMainMenuArt,
-                "把主菜单背景换成内置插画。图片已打包进插件，不需要额外文件。"));
             list.Add(Toggle("标记同装 ACE 的玩家", cfg.AcePresenceEnabled,
                 "跟同样装了 Apex Cheat Ender 的人互相认一下，在对方名字上加个标记。"));
             list.Add(new SettingRow
@@ -668,8 +776,26 @@ namespace ApexCheatEnder.UI
                     AntiCheatRuntime.ApplyConfigChange();
                 },
             });
+            list.Add(Toggle("抓非法破坏", cfg.SabotageCheck, "检查破坏者角色、会议状态和目标范围。"));
+            list.Add(Toggle("抓角色动作异常", cfg.RoleActionCheck, "检查变形、保护等角色能力是否合法。"));
+            list.Add(Toggle("抓聊天刷屏和非法消息", cfg.ChatCheck, "检查聊天频率和消息内容。"));
+            list.Add(Toggle("抓非法昵称", cfg.NameCheck, "检查空昵称、超长昵称和控制字符。"));
             list.Add(Toggle("输出详细日志", cfg.VerboseLogging,
                 "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
+            list.Add(Toggle("疑似骂人短提示", cfg.ShowChatAbuseNotice,
+                "仅本地提示 1.2 秒，Esc 关闭；可能误报，不记作弊证据、不踢人。"));
+            list.Add(new SettingRow
+            {
+                Label = "疑似骂人关键词",
+                Hint = "逗号分隔，留空禁用匹配。引用也可能误报，避免泛词。",
+                Kind = RowKind.TextField,
+                GetText = () => cfg.ChatAbuseKeywords.Value ?? string.Empty,
+                SetText = value =>
+                {
+                    cfg.ChatAbuseKeywords.Value = value ?? string.Empty;
+                    FlashSaved();
+                },
+            });
             return list;
         }
 
@@ -788,13 +914,88 @@ namespace ApexCheatEnder.UI
         }
 
         /// <summary>页「关于」：版本与帮助。</summary>
+        private static List<SettingRow> BuildToolsPage(AntiCheatConfig cfg)
+        {
+            var list = new List<SettingRow>();
+            var presets = new[] { "保守", "标准", "严格" };
+            list.Add(Action("规则预设", "切换并应用阈值；自动踢人设置保持原样。", () =>
+            {
+                _preset = (_preset + 1) % presets.Length;
+                cfg.ApplyPreset(_preset);
+                AntiCheatRuntime.ApplyConfigChange();
+                FlashSaved();
+            }, () => presets[_preset]));
+            list.Add(Action("恢复安全默认", "五秒内再次点击确认；保留自动踢人和自定义文本。", () =>
+            {
+                if (!RestoreConfirmation.Confirm(Time.unscaledTime)) return;
+                cfg.RestoreSafeDefaults();
+                AntiCheatRuntime.ApplyConfigChange();
+                FlashSaved();
+            }, () => RestoreConfirmation.Armed(Time.unscaledTime) ? "再次点击确认" : "恢复默认"));
+            list.Add(Toggle("重复聊天本地提示", cfg.ShowRepeatedChatNotice,
+                "默认关闭；按发送者计数，10秒冷却，不计作弊、不踢人。"));
+            list.Add(Number("重复几次才提示", cfg.RepeatedChatThreshold, 1f, 3f, 10f,
+                "同一发送者10秒内连续发送相同消息的次数。", true));
+            foreach (ViolationKind kind in Enum.GetValues(typeof(ViolationKind)))
+            {
+                var rule = kind;
+                list.Add(Action("分组 · " + rule, "点击依次切换六组并保存；仅影响历史分类。", () =>
+                {
+                    cfg.RuleGroupMapping.Value = RuleGroups.Cycle(rule, cfg.RuleGroupMapping.Value);
+                    _historyPage = 0;
+                    AntiCheatRuntime.ApplyConfigChange();
+                    FlashSaved();
+                    BuildRows(_currentPage);
+                }, () => RuleGroups.Resolve(rule, cfg.RuleGroupMapping.Value)));
+            }
+            list.Add(Info("性能", "低频采样，只在本地显示。", () => $"{AntiCheatRuntime.CurrentFps:F0} FPS"));
+            list.Add(Action("导出脱敏诊断", "不包含昵称、聊天原文或配置。", () =>
+            {
+                _exportStatus = AntiCheatRuntime.ExportDiagnostics();
+            }, () => _exportStatus));
+            list.Add(Action("历史分类", "使用本地规则分组映射过滤。", () =>
+            {
+                _historyGroup = (_historyGroup + 1) % (RuleGroups.Names.Length + 1);
+                _historyPage = 0;
+                BuildRows(_currentPage);
+            }, () => _historyGroup == 0 ? "全部" : RuleGroups.Names[_historyGroup - 1]));
+            var filtered = new List<Violation>();
+            if (AntiCheatRuntime.Verdicts != null)
+                filtered.AddRange(RuleGroups.Filter(AntiCheatRuntime.Verdicts.History, _historyGroup, cfg.RuleGroupMapping.Value));
+            var pages = Math.Max(1, (filtered.Count + 7) / 8);
+            _historyPage = Math.Min(_historyPage, pages - 1);
+            list.Add(Action("历史分页", "每页八条，最多保留256条事件。", () =>
+            {
+                _historyPage = (_historyPage + 1) % pages;
+                BuildRows(_currentPage);
+            }, () => $"{_historyPage + 1}/{pages} · {filtered.Count}条"));
+            for (var i = _historyPage * 8; i < Math.Min(filtered.Count, (_historyPage + 1) * 8); i++)
+            {
+                var item = filtered[i];
+                list.Add(Action($"玩家 {item.PlayerId} · {item.Kind}", item.Severity.ToString(), () =>
+                {
+                    _selectedDetail = item.Detail;
+                    BuildRows(_currentPage);
+                }, () => "查看详情"));
+            }
+            list.Add(Info("命中详情", _selectedDetail ?? "点击历史条目查看依据。", () => "本地记录"));
+            if (AntiCheatRuntime.Verdicts != null)
+                foreach (var verdict in AntiCheatRuntime.Verdicts.RankedVerdicts())
+                {
+                    if (verdict.EvaluateLevel() == RiskLevel.Normal) continue;
+                    var v = verdict;
+                    list.Add(Info($"玩家 {v.PlayerId} 风险", "仅本地显示，不修改网络名字。", () => v.EvaluateLevel().ToString()));
+                }
+            return list;
+        }
+
         private static List<SettingRow> BuildAboutPage()
         {
             var list = new List<SettingRow>();
             // 版本号直接取常量，避免与 csproj 的 <Version> 各写各的（曾因此对不上）
             list.Add(Info("插件名称", "Apex Cheat Ender",
                 () => AntiCheatPlugin.PluginVersion));
-            list.Add(Info("快捷键", "Insert 打开这个界面，F8 开关右上角监控面板。", () => ""));
+            list.Add(Info("快捷键", "Insert 打开或关闭设置；按住标题栏拖动窗口。", () => ""));
             list.Add(Info("改配置要不要重启", "不用。用记事本改完保存，游戏里几秒内自动生效。", () => ""));
             list.Add(Info("配置文件在哪", "BepInEx/config/apex.cheat.ender.cfg", () => ""));
             list.Add(Info("被误判了怎么办", "去「跑多快算作弊」页把倍数往松了调，或者关掉对应那条检测。", () => ""));
@@ -832,9 +1033,16 @@ namespace ApexCheatEnder.UI
                 Label = label,
                 Hint = hint,
                 Kind = RowKind.Number,
-                GetValue = () => integer
-                    ? "[ - ]  " + entry.Value.ToString("F0") + "  [ + ]"
-                    : "[ - ]  " + entry.Value.ToString("F2") + "  [ + ]",
+                Min = min, Max = max, Step = step, Integer = integer,
+                ReadNumber = () => entry.Value,
+                WriteNumber = value =>
+                {
+                    if (entry.Value == value) return;
+                    entry.Value = value;
+                    FlashSaved();
+                    AntiCheatRuntime.ApplyConfigChange();
+                },
+                GetValue = () => entry.Value.ToString(integer ? "F0" : "0.##"),
                 OnMinus = () =>
                 {
                     entry.Value = Mathf.Clamp(entry.Value - step, min, max);
@@ -860,16 +1068,26 @@ namespace ApexCheatEnder.UI
                 Label = label,
                 Hint = hint,
                 Kind = RowKind.Number,
-                GetValue = () => "[ - ]  " + entry.Value + "  [ + ]",
+                Min = min, Max = max, Step = 1f, Integer = true,
+                ReadNumber = () => entry.Value,
+                WriteNumber = value =>
+                {
+                    var next = (int)value;
+                    if (entry.Value == next) return;
+                    entry.Value = next;
+                    FlashSaved();
+                    AntiCheatRuntime.ApplyConfigChange();
+                },
+                GetValue = () => entry.Value.ToString(),
                 OnMinus = () =>
                 {
-                    entry.Value = Mathf.Clamp(entry.Value - (int)step, (int)min, (int)max);
+                    entry.Value = Mathf.Clamp(entry.Value - 1, (int)min, (int)max);
                     FlashSaved();
                     AntiCheatRuntime.ApplyConfigChange();
                 },
                 OnPlus = () =>
                 {
-                    entry.Value = Mathf.Clamp(entry.Value + (int)step, (int)min, (int)max);
+                    entry.Value = Mathf.Clamp(entry.Value + 1, (int)min, (int)max);
                     FlashSaved();
                     AntiCheatRuntime.ApplyConfigChange();
                 },
@@ -899,117 +1117,9 @@ namespace ApexCheatEnder.UI
             };
         }
 
-        // ================= AI 页 =================
-
-        /// <summary>
-        /// AI 页。
-        ///
-        /// 只有一个供应商，且用户唯一需要提供的东西是一把密钥——
-        /// 接口地址、模型名这些全在 <see cref="AiProviders"/> 里写死，
-        /// 用户填错一个字符就 404 的机会被彻底消掉。
-        ///
-        /// 密钥用自制输入控件：候选字符网格点选 + 剪贴板粘贴，
-        /// 不依赖 uGUI 的 InputField（它在 IL2CPP 下挂委托不稳）。
-        /// </summary>
-        private static List<SettingRow> BuildAiPage()
-        {
-            var cfg = AntiCheatRuntime.Config;
-            var list = new List<SettingRow>();
-            if (cfg == null) return list;
-
-            var ai = AntiCheatRuntime.AiAnalyzer;
-            var provider = AiProviders.Resolve(cfg.AiProvider.Value);
-
-            var problem = ai?.ConfigProblem;
-            list.Add(Info("现在的状态",
-                string.IsNullOrEmpty(problem) ? "都配好了，AI 可以用了。" : "还差一步才能用。",
-                () => string.IsNullOrEmpty(problem) ? "可以用了 ✓" : problem));
-
-            list.Add(Toggle("启用 AI 分析", cfg.AiAnalysisEnabled,
-                "让大模型帮忙看一眼规则引擎命中的行为，判断是不是真的作弊。"
-                + "它只是多一重参考，最终判定权还在规则引擎手上。默认关着，因为要花钱。"));
-
-            list.Add(Action("用哪家", "换供应商只需要在这里点一下。想加别家，在代码的 AiProviders.cs 里加一行。",
-                () =>
-                {
-                    var all = AiProviders.All;
-                    var i = 0;
-                    for (var k = 0; k < all.Count; k++)
-                        if (all[k].DisplayName == cfg.AiProvider.Value) { i = k; break; }
-                    cfg.AiProvider.Value = all[(i + 1) % all.Count].DisplayName;
-                    FlashSaved();
-                    AntiCheatRuntime.ApplyConfigChange();
-                    BuildRows(_currentPage);
-                },
-                () => provider.DisplayName));
-
-            list.Add(Info("这家怎么样", provider.Summary, () => ""));
-            list.Add(Info("密钥长什么样", "形如 " + provider.KeyHint + "。", () => ""));
-            list.Add(Info("去哪拿密钥", provider.SignupUrl, () => "[ 见下面说明 ]"));
-
-            list.Add(new SettingRow
-            {
-                Label = "密钥",
-                Hint = "点输入框开始填。键盘上按 Ctrl+V 可以直接粘贴，Backspace 删掉最后一位。",
-                Kind = RowKind.TextField,
-                GetValue = () => string.IsNullOrEmpty(provider.NormalizeKey(cfg.AiApiKey.Value))
-                    ? "还没填"
-                    : "已填好 ✓",
-                GetText = () => cfg.AiApiKey.Value ?? string.Empty,
-                SetText = v =>
-                {
-                    cfg.AiApiKey.Value = v;
-                    FlashSaved();
-                    AntiCheatRuntime.ApplyConfigChange();
-                },
-            });
-
-            list.Add(Number("命中几条规则才去问 AI", cfg.AiMinHitsToTrigger, 1f, 1f, 20f,
-                "一条都没命中就不花钱去问了。调高一点更省钱，因为 AI 只做最后确认。", true));
-            list.Add(Number("同一个人隔多久再问一次", cfg.AiCooldownSeconds, 5f, 5f, 600f,
-                "防止一个人持续作弊导致账单失控。", true));
-            list.Add(Number("等它多久算超时", cfg.AiTimeoutSeconds, 1f, 3f, 60f,
-                "模型没在这个时间内回答，就放弃本次分析。", true));
-            list.Add(Toggle("把玩家昵称一起发过去", cfg.AiSendPlayerNames,
-                "关掉的话只发 Player#编号，不发真名。建议保持关闭，行为数据一样能分析。"));
-
-            var verdicts = AntiCheatRuntime.Verdicts;
-            if (verdicts == null) return list;
-
-            foreach (var v in verdicts.RankedVerdicts())
-            {
-                if (v.EvaluateLevel() == RiskLevel.Normal) continue;
-
-                var pid = v.PlayerId;
-                var verdict = v;
-                list.Add(Action("分析 " + v.Name, "把这个玩家最近的 RPC 序列发给大模型看一遍。",
-                    () => AntiCheatRuntime.AiAnalyzer?.ManualAnalyze(pid, verdict),
-                    () =>
-                    {
-                        var st = AntiCheatRuntime.AiAnalyzer?.GetState(pid);
-                        if (st == null) return "[ 点击分析 ]";
-                        if (st.Running) return "[ 分析中... ]";
-                        return "[ " + Shorten(st.Summary, 20) + " ]";
-                    }));
-            }
-
-            return list;
-        }
-
-        private static string Shorten(string text, int max)
-        {
-            if (string.IsNullOrEmpty(text)) return string.Empty;
-            return text.Length <= max ? text : text.Substring(0, max) + "…";
-        }
-
         // ================= 交互 =================
 
-        /// <summary>每帧调用。</summary>
-        /// <summary>
-        /// 设置界面当前是否打开。
-        /// 监控面板常驻右上角，正好压在设置窗口的标题栏上 —— 屏幕就那么大，
-        /// 两个面板叠在一起谁都看不清。由监控面板读这个标志来让位。
-        /// </summary>
+        /// <summary>设置界面当前是否打开。</summary>
         public static bool IsOpen => _visible;
 
         public static void Tick(bool toggleRequested)
@@ -1018,8 +1128,11 @@ namespace ApexCheatEnder.UI
 
             if (toggleRequested)
             {
+                RestoreConfirmation.Cancel();
                 _visible = !_visible;
                 _root.SetActive(_visible);
+                _activeSlider = null;
+                _windowDragging = _scrollDragging = _pressArmed = _gestureMoved = false;
                 if (_visible)
                 {
                     _nextRowRefresh = 0f;     // 打开时立刻刷一次
@@ -1030,23 +1143,33 @@ namespace ApexCheatEnder.UI
 
             if (!_visible) return;
 
-            // 密钥输入控件先吃事件，避免点键盘时顺带把别的开关点了
+            ClampWindow();
+            if (HandleWindowDrag()) return;
+
+            // 输入控件先吃事件，避免点键盘时顺带把别的开关点了
             var inputCaptured = false;
-            if (_keyInput != null)
+            foreach (var input in TextInputs)
             {
-                _keyInput.Tick();
-                inputCaptured = _keyInput.CapturesMouse;
+                input.Tick();
+                inputCaptured |= input.CapturesMouse;
             }
 
             if (!inputCaptured)
             {
-                HandleScroll();
-                HandleClick();
+                if (!HandleSlider())
+                {
+                    HandleClick();
+                    HandleScroll();
+                }
+            }
+            else
+            {
+                _pressArmed = _scrollDragging = false;
             }
 
             ApplyScroll();
 
-            // 节流到 5Hz：行值里只有 AI 状态是异步变化的，不需要每帧重算。
+            // 节流到 5Hz：配置行值不需要每帧重算。
             // 原先每帧遍历所有行 + 字符串 Contains，是可见期间的持续垃圾来源。
             if (Time.time >= _nextRowRefresh)
             {
@@ -1057,6 +1180,35 @@ namespace ApexCheatEnder.UI
             RefreshFooter();
         }
 
+        private static void ClampWindow()
+        {
+            var scale = Mathf.Min(1f, Mathf.Min(Screen.width / WindowWidth, Screen.height / WindowHeight));
+            _windowRect.localScale = new Vector3(scale, scale, 1f);
+            var x = Mathf.Max(0f, (Screen.width - WindowWidth * scale) / 2f);
+            var y = Mathf.Max(0f, (Screen.height - WindowHeight * scale) / 2f);
+            var p = _windowRect.anchoredPosition;
+            _windowRect.anchoredPosition = new Vector2(Mathf.Clamp(p.x, -x, x), Mathf.Clamp(p.y, -y, y));
+        }
+
+        private static bool HandleWindowDrag()
+        {
+            var mouse = Input.mousePosition;
+            if (Input.GetMouseButtonDown(0) &&
+                RectTransformUtility.RectangleContainsScreenPoint(_titleRect, mouse, null))
+            {
+                _windowDragging = true;
+                _pressArmed = _scrollDragging = false;
+                _scrollVelocity = 0f;
+                _dragStart = new Vector2(mouse.x, mouse.y);
+                _windowStart = _windowRect.anchoredPosition;
+            }
+            if (!_windowDragging) return false;
+            _windowRect.anchoredPosition = _windowStart + new Vector2(mouse.x, mouse.y) - _dragStart;
+            ClampWindow();
+            if (Input.GetMouseButtonUp(0) || !Input.GetMouseButton(0)) _windowDragging = false;
+            return true; // 包括松开帧，防止一次拖动再触发行点击。
+        }
+
         // ================= 滚动 =================
 
         /// <summary>
@@ -1065,7 +1217,7 @@ namespace ApexCheatEnder.UI
         /// </summary>
         private static void HandleScroll()
         {
-            var max = Mathf.Max(0f, _contentHeight - _viewportHeight);
+            var max = SettingsLayout.MaxScroll(_contentHeight, _viewportHeight);
             if (max <= 0f)
             {
                 _scrollOffset = 0f;
@@ -1087,9 +1239,9 @@ namespace ApexCheatEnder.UI
                 }
 
                 // 拖拽：按住左键上下拖
-                if (Input.GetMouseButton(0))
+                if (_scrollDragging && _gestureMoved && Input.GetMouseButton(0))
                 {
-                    var dy = mouse.y - _lastMouseY;
+                    var dy = (mouse.y - _lastMouseY) / Mathf.Max(_windowRect.localScale.y, 0.01f);
                     if (Mathf.Abs(dy) > 0.01f)
                     {
                         _scrollOffset += dy;
@@ -1117,7 +1269,7 @@ namespace ApexCheatEnder.UI
         private static void ApplyScroll()
         {
             if (_contentArea == null) return;
-            var max = Mathf.Max(0f, _contentHeight - _viewportHeight);
+            var max = SettingsLayout.MaxScroll(_contentHeight, _viewportHeight);
             _scrollOffset = Mathf.Clamp(_scrollOffset, 0f, max);
             _contentArea.anchoredPosition = new Vector2(0f, _scrollOffset);
         }
@@ -1145,6 +1297,33 @@ namespace ApexCheatEnder.UI
                              + "用记事本改完保存也会自动生效。";
         }
 
+        private static bool HandleSlider()
+        {
+            var mouse = Input.mousePosition;
+            if (_activeSlider == null && Input.GetMouseButtonDown(0) && MouseOverViewport(mouse))
+            {
+                foreach (var row in Rows)
+                {
+                    if (row.SliderRect == null || !RectTransformUtility.RectangleContainsScreenPoint(row.SliderRect, mouse, null)) continue;
+                    _activeSlider = row;
+                    _pressArmed = _scrollDragging = false;
+                    _scrollVelocity = 0f;
+                    break;
+                }
+            }
+            if (_activeSlider == null) return false;
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(_activeSlider.SliderRect, mouse, null, out var point))
+            {
+                var bounds = _activeSlider.SliderRect.rect;
+                var model = _activeSlider.Model;
+                model.WriteNumber(SettingsLayout.SliderValue((point.x - bounds.xMin) / bounds.width,
+                    model.Min, model.Max, model.Step, model.Integer));
+                RefreshRowValues();
+            }
+            if (Input.GetMouseButtonUp(0) || !Input.GetMouseButton(0)) _activeSlider = null;
+            return true;
+        }
+
         private static void HandleClick()
         {
             // 改成「按下记录 + 松开触发」：
@@ -1152,19 +1331,25 @@ namespace ApexCheatEnder.UI
             if (Input.GetMouseButtonDown(0))
             {
                 _pressPos = Input.mousePosition;
-                _pressArmed = true;
+                _pressArmed = RectTransformUtility.RectangleContainsScreenPoint(_windowRect, _pressPos, null);
+                _scrollDragging = MouseOverViewport(_pressPos);
+                _gestureMoved = false;
+                _scrollVelocity = 0f;
+                _lastMouseY = _pressPos.y;
                 return;
             }
 
+            if (_pressArmed && (Mathf.Abs(Input.mousePosition.x - _pressPos.x) > 6f ||
+                Mathf.Abs(Input.mousePosition.y - _pressPos.y) > 6f)) _gestureMoved = true;
             if (!Input.GetMouseButtonUp(0)) return;
+            _scrollDragging = false;
             if (!_pressArmed) return;
             _pressArmed = false;
 
             var mouse = Input.mousePosition;
 
             // 移动超过阈值 → 判定为拖拽滚动，不触发点击
-            if (Mathf.Abs(mouse.x - _pressPos.x) > 6f ||
-                Mathf.Abs(mouse.y - _pressPos.y) > 6f) return;
+            if (_gestureMoved) return;
 
             foreach (var tab in Tabs)
             {
@@ -1173,12 +1358,33 @@ namespace ApexCheatEnder.UI
                 return;
             }
 
+            foreach (var tab in SubTabs)
+            {
+                if (!RectTransformUtility.RectangleContainsScreenPoint(tab.Rect, mouse, null) ||
+                    !RectTransformUtility.RectangleContainsScreenPoint(tab.Rect, _pressPos, null)) continue;
+                SelectedSubTabs[_currentPage] = tab.Index;
+                BuildSubTabs(_currentPage);
+                BuildRows(_currentPage);
+                return;
+            }
+            if (MouseOverViewport(mouse))
+            {
+                foreach (var header in CardHeaders)
+                {
+                    if (!RectTransformUtility.RectangleContainsScreenPoint(header.Rect, mouse, null) ||
+                        !RectTransformUtility.RectangleContainsScreenPoint(header.Rect, _pressPos, null)) continue;
+                    header.Model.OnToggle();
+                    return;
+                }
+            }
+
             // 行命中必须先确认鼠标在视口内 —— 被裁剪掉（滚出视口）的行，
             // 其 RectTransform 的屏幕坐标仍在视口之外，不判这一条会点错。
             if (!MouseOverViewport(mouse)) return;
 
             foreach (var row in Rows)
             {
+                if (!RectTransformUtility.RectangleContainsScreenPoint(row.Rect, _pressPos, null)) continue;
                 if (row.Model.Kind == RowKind.Number)
                 {
                     if (row.MinusRect != null &&

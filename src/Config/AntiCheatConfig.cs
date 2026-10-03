@@ -98,13 +98,15 @@ namespace ApexCheatEnder.Config
 
         // ================= 界面 =================
 
-        public readonly ConfigEntry<bool> ShowOverlay;
         public readonly ConfigEntry<bool> ShowDesktopSplash;
         public readonly ConfigEntry<bool> ShowNotifications;
         public readonly ConfigEntry<float> NotificationDuration;
 
-        /// <summary>把主菜单背景换成内置插画。</summary>
-        public readonly ConfigEntry<bool> ShowMainMenuArt;
+        public readonly ConfigEntry<bool> ShowChatAbuseNotice;
+        public readonly ConfigEntry<string> ChatAbuseKeywords;
+        public readonly ConfigEntry<bool> ShowRepeatedChatNotice;
+        public readonly ConfigEntry<int> RepeatedChatThreshold;
+        public readonly ConfigEntry<string> RuleGroupMapping;
 
         /// <summary>识别并标记同样装了本插件的玩家。</summary>
         public readonly ConfigEntry<bool> AcePresenceEnabled;
@@ -175,31 +177,6 @@ namespace ApexCheatEnder.Config
 
         public readonly ConfigEntry<string> TrustedPluginGuids;
         public readonly ConfigEntry<string> TrustedPluginNames;
-
-        // ================= AI 分析 =================
-
-        /// <summary>要不要用大模型做二次确认。</summary>
-        public readonly ConfigEntry<bool> AiAnalysisEnabled;
-
-        /// <summary>
-        /// 选哪家供应商。存的是显示名（比如 DeepSeek），
-        /// 接口地址和模型由 <see cref="AiProviders"/> 提供，用户不用管。
-        /// </summary>
-        public readonly ConfigEntry<string> AiProvider;
-
-        /// <summary>密钥。用户唯一需要自己填的东西。</summary>
-        public readonly ConfigEntry<string> AiApiKey;
-
-        /// <summary>命中多少条规则才值得花钱去问 AI。</summary>
-        public readonly ConfigEntry<int> AiMinHitsToTrigger;
-
-        /// <summary>同一个玩家隔多久才再问一次。</summary>
-        public readonly ConfigEntry<int> AiCooldownSeconds;
-
-        public readonly ConfigEntry<int> AiTimeoutSeconds;
-
-        /// <summary>要不要把玩家昵称一起发过去。</summary>
-        public readonly ConfigEntry<bool> AiSendPlayerNames;
 
         public AntiCheatConfig(ConfigFile cfg)
         {
@@ -299,8 +276,6 @@ namespace ApexCheatEnder.Config
 
             // ---------------- 界面 ----------------
             const string F = "界面显示";
-            ShowOverlay = cfg.Bind(F, "显示右上角监控面板", true,
-                "一直显示防护状态和规则命中排行。游戏中按 F8 可以临时关掉。");
             ShowDesktopSplash = cfg.Bind(F, "显示开机启动动画", true,
                 "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。");
             ShowNotifications = cfg.Bind(F, "屏幕顶部弹出提醒", true,
@@ -309,9 +284,21 @@ namespace ApexCheatEnder.Config
                 new ConfigDescription(
                     "通知自动消失的时间。",
                     new AcceptableValueRange<float>(1f, 20f)));
-            ShowMainMenuArt = cfg.Bind(F, "自定义主菜单背景", true,
-                "把主菜单背景换成内置的插画。" + NL +
-                "图片已经打包进插件里了，不需要你额外放文件。");
+
+            ShowChatAbuseNotice = cfg.Bind(F, "疑似骂人短提示", true,
+                "仅聊天匹配关键词时在本地游戏 Canvas 显示图片 1.2 秒，Esc 关闭，10 秒冷却。" + NL +
+                "关键词无法理解语境，引用或讨论也可能误报；只标为疑似，不计作弊证据，不踢人，可随时关闭。");
+            ChatAbuseKeywords = cfg.Bind(F, "疑似骂人关键词", ChatAbuseNoticePolicy.DefaultKeywords,
+                "自定义关键词，用逗号分隔；留空不提示。仅直接子串匹配，不推断语境。" + NL +
+                "避免使用宽泛单字以减少误报；不影响聊天发送或原有反作弊功能。");
+
+            ShowRepeatedChatNotice = cfg.Bind(F, "重复聊天本地提示", false,
+                "同一玩家10秒内重复相同消息时仅本地提醒，不拦截聊天、不生成作弊证据。");
+            RepeatedChatThreshold = cfg.Bind(F, "重复几次才提示", 3,
+                new ConfigDescription("10秒内相同消息达到此次数才提示，10秒冷却。", new AcceptableValueRange<int>(3, 10)));
+            RuleGroupMapping = cfg.Bind("本地规则分组", "规则到分组映射", RuleGroups.Defaults(),
+                "格式：Teleport=移动;IllegalChat=消息。仅影响本地历史分类，不影响检测和处置。" + NL +
+                "允许分组：移动、动作、会议、消息、网络、静态。非法映射回退内置分组，不执行代码、不联网。");
 
             // ---------------- 同装 ACE 的玩家 ----------------
             AcePresenceEnabled = cfg.Bind(F, "标记同装 ACE 的玩家", true,
@@ -424,37 +411,30 @@ namespace ApexCheatEnder.Config
             TrustedPluginNames = cfg.Bind(J, "信任的插件名", "",
                 "用英文逗号隔开。按插件名字匹配，认不出 GUID 时用这个。一般不用填。");
 
-            // ---------------- AI 分析 ----------------
-            const string K = "AI 智能分析";
-            AiAnalysisEnabled = cfg.Bind(K, "启用 AI 分析", false,
-                "让大模型帮忙看一眼规则引擎命中的行为，判断是不是真的作弊。" + NL +
-                "它只是多一重参考，不会替代上面的检测，最终判定权还在规则引擎手上。" + NL +
-                "要额外花钱（新用户一般有免费额度），所以默认关着。" + NL +
-                "开启前请先在下面填好密钥。");
-            AiProvider = cfg.Bind(K, "用哪家的模型", AiProviders.DefaultDisplayName,
-                "选一家。接口地址和模型这些细节插件已经内置，你不用管。" + NL +
-                "想换别家，在代码的 AiProviders.cs 里加一行就行。");
-            AiApiKey = cfg.Bind(K, "密钥", "",
-                "去那家模型的官网注册后拿到的密钥，形如 sk- 开头的一长串。" + NL +
-                "游戏里按 Insert 打开设置可以直接填，不用手改这个文件。" + NL +
-                "注意：明文存在这个文件里，别把配置文件发给别人。");
-            AiMinHitsToTrigger = cfg.Bind(K, "命中几条规则才去问 AI", 1,
-                new ConfigDescription(
-                    "命中规则少于这个数就不花钱去问了。" + NL +
-                    "调高一点更省钱，因为 AI 只做最后确认。",
-                    new AcceptableValueRange<int>(1, 20)));
-            AiCooldownSeconds = cfg.Bind(K, "同一个人隔多久再问一次", 30,
-                new ConfigDescription(
-                    "同一个玩家至少间隔这么多秒才会再问一次。" + NL +
-                    "防止一个人持续作弊导致账单失控。",
-                    new AcceptableValueRange<int>(5, 600)));
-            AiTimeoutSeconds = cfg.Bind(K, "等它多久算超时（秒）", 12,
-                new ConfigDescription(
-                    "模型没在这个时间内回答，就放弃本次分析。",
-                    new AcceptableValueRange<int>(3, 60)));
-            AiSendPlayerNames = cfg.Bind(K, "把玩家昵称一起发过去", false,
-                "关掉的话只会发 Player#编号，不发真名。" + NL +
-                "建议保持关闭，行为数据一样能分析。");
+        }
+
+        // 预设只覆盖移动阈值；不更改检测开关、聊天规则、白名单或处罚权限。
+        public void ApplyPreset(int preset)
+        {
+            if (preset < 0 || preset > 2) return;
+            MaxSpeedTolerance.Value = preset == 0 ? 2f : preset == 1 ? 1.6f : 1.4f;
+            TeleportMinDistance.Value = preset == 0 ? 6f : preset == 1 ? 4.5f : 4f;
+            SpeedStrikeCount.Value = preset == 0 ? 5 : preset == 1 ? 3 : 2;
+            RoundStartGracePeriod.Value = preset == 0 ? 6f : 4f;
+            PositionJitterTolerance.Value = preset == 0 ? 0.5f : preset == 1 ? 0.35f : 0.3f;
+        }
+
+        public void RestoreSafeDefaults()
+        {
+            foreach (var field in typeof(AntiCheatConfig).GetFields())
+            {
+                // 用户自定义内容与处罚权限永远不由恢复默认覆盖。
+                if (field.Name == nameof(AllowAutoKick) || field.Name == nameof(DispositionMode) ||
+                    field.Name == nameof(ChatAbuseKeywords) || field.Name == nameof(AcePresenceTag) ||
+                    field.Name == nameof(TrustedPluginGuids) || field.Name == nameof(TrustedPluginNames) ||
+                    field.Name == nameof(RuleGroupMapping)) continue;
+                if (field.GetValue(this) is ConfigEntryBase entry) entry.BoxedValue = entry.DefaultValue;
+            }
         }
 
         public string[] GetTrustedGuids() => SplitList(TrustedPluginGuids.Value);

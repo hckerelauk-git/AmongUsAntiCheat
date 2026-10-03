@@ -33,6 +33,7 @@ namespace ApexCheatEnder.Core
         public event Action<PlayerVerdict> PlayerWarned;
 
         public IReadOnlyDictionary<int, PlayerVerdict> Verdicts => _verdicts;
+        internal LocalEventHistory History { get; } = new LocalEventHistory();
 
         public VerdictEngine(AntiCheatConfig cfg, ManualLogSource log)
         {
@@ -67,8 +68,10 @@ namespace ApexCheatEnder.Core
                 if (last.Kind == violation.Kind && Math.Abs(now - last.Timestamp) < 0.25f) return;
             }
 
+            History.Add(violation);
             if (violation.PlayerId < 0)
             {
+                if (GlobalEvidence.Count >= LocalEventHistory.Capacity) GlobalEvidence.RemoveAt(0);
                 GlobalEvidence.Add(violation);
                 _log.LogWarning($"[全局证据] {violation}");
                 return;

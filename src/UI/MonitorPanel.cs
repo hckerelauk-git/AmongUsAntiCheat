@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text;
 using ApexCheatEnder.Core;
 using UnityEngine;
 using UnityEngine.UI;
@@ -9,71 +8,117 @@ namespace ApexCheatEnder.UI
     /// <summary>
     /// Apex Cheat Ender 监控面板：常驻屏幕右上角，显示防护状态与规则命中排行。
     ///
-    /// 布局：
-    ///   ┌──────────────────────────────┐
-    ///   │ [盾] APEX CHEAT ENDER     ●  │
-    ///   │ ──────────────────────────── │
-    ///   │ 防护中    插件 5    命中 0    │
-    ///   │ 规则命中                    │
-    ///   │ Player1  2.40 ██████░░  5条  │
-    ///   │ ──────────────────────────── │
-    ///   │ F8 隐藏                       │
-    ///   └──────────────────────────────┘
+    /// ────────────── 版式（参考 Amethyst 的视觉语言，配色不变） ──────────────
+    ///
+    ///   ┌──────────────────────────────────────────────┐
+    ///   │ ┌──┐  APEX CHEAT ENDER          ⬤ 防护中      │  ← 图标徽章 + 标题 + 状态胶囊
+    ///   │ └──┘                                          │
+    ///   │ ──────────────────────────────────────────── │
+    ///   │ ┌ 插件 5 ┐┌ 信任 2 ┐┌ 命中 0 ┐               │  ← 三枚统计芯片
+    ///   │                                               │
+    ///   │  规则命中 ───                                 │  ← 小节标题 + 短强调线
+    ///   │  ┌ 高危 ┐ Player_01        3 条  ▰▰▰▰▱▱▱    │  ← 列表行：标签芯片/名字/计数/进度条
+    ///   │  ┌ 命中 ┐ Impostor_X       2 条  ▰▰▱▱▱▱▱    │
+    ///   │ ──────────────────────────────────────────── │
+    ///   │  [F8] 隐藏面板                                │  ← 键帽 + 提示
+    ///   └──────────────────────────────────────────────┘
+    ///
+    /// 相比上一版的三处结构性改动（这才是「AI 味」的来源）：
+    ///   1. **去掉上下两条通铺的彩色长条** —— 那是典型「生成式仪表盘」套路，
+    ///      换成「头部一条细分隔线 + 左侧对齐的呼吸感留白」
+    ///   2. **进度条改成实心圆角条**，不再用 Unicode `█░` 方块字符 ——
+    ///      方块字符在不同字体下宽窄不一，行与行永远对不齐
+    ///   3. **状态与标签改用胶囊芯片承载**，不再用 `●` 加纯文本；
+    ///      列表行做列对齐（标签 / 名字 / 计数 / 条），四列各自成线
     ///
     /// 按 F8 切换显示。
     /// </summary>
     internal static class MonitorPanel
     {
-        private const float PanelWidth = 348f;
-        private const float PanelHeight = 232f;
+        // ================= 面板尺寸 =================
+        private const float PanelWidth = 360f;
+        private const float PanelHeight = 290f;
         private const float Margin = 20f;
+        private const float PadX = 14f;
+
+        // ================= 头部 =================
+        private const float HeaderTop = 12f;
+        private const float BadgeSize = 30f;
+        private const float TitleLeft = 52f;
+        private const float StatusChipW = 96f;
+        private const float StatusChipH = 22f;
+
+        // ================= 纵向节奏（距面板顶部） =================
+        private const float Divider1Y = 50f;
+        private const float ChipsTop = 58f;
+        private const float ChipHeight = 22f;
+        private const float ChipGap = 6f;
+        private const float SectionTop = 90f;
+        private const float ListTop = 106f;
+        private const float RowHeight = 24f;
+        private const float Divider2Y = 256f;
+        private const float FooterTop = 260f;
+
+        // ================= 列表行内部列宽 =================
+        private const float MarkerW = 44f;
+        private const float MarkerH = 18f;
+        private const float NameLeft = 64f;
+        private const float NameW = 150f;
+        private const float CountLeft = 214f;
+        private const float CountW = 56f;
+        private const float BarLeft = 278f;
+        private const float BarW = 68f;
+        private const float BarH = 6f;
+
         private const int MaxRows = 6;
-        private const int BarLength = 8;
-
-        /// <summary>卡片圆角半径（像素）。</summary>
         private const int CardRadius = 14;
+        private const int MarkerRadius = 9;
 
-        /// <summary>顶部/底部条距卡片边缘的内缩距离。</summary>
-        private const float CardInset = 8f;
+        /// <summary>面板刷新间隔（秒）。</summary>
+        private const float RefreshInterval = 0.2f;
 
-        private static bool _built;
-        private static GameObject _root;
-        private static Image _shield;
-        private static Image _statusBar;
-        private static Text _headerText;
-        private static Text _statusDot;
-        private static Text _summaryText;
-        private static Text _listText;
-        private static bool _visible = true;
-        private static bool _visibleInitialized;
-
-        /// <summary>首次 Tick 的时刻，用于延迟显示。</summary>
-        private static float _firstTickTime = -1f;
-
-        /// <summary>
-        /// 延迟显示时长（秒）。
-        /// 反作弊的初始化是异步的（特征库加载、静态扫描），
-        /// 面板应当在初始化完成之后再出现，而不是一进游戏就空着占屏幕。
-        /// 这里取略长于桌面启动动画的时长。
-        /// </summary>
+        /// <summary>延迟显示时长（秒）——等反作弊初始化完成再出现。</summary>
         private const float ShowDelaySeconds = 4.6f;
 
-        /// <summary>
-        /// 面板刷新间隔（秒）。
-        ///
-        /// 必须节流：Refresh() 会遍历全部玩家、排序、拼字符串并赋值给 Text。
-        /// 早期版本每帧都跑一遍，等于每秒 60 次列表分配 + 字符串分配，
-        /// 持续制造 GC 压力——这是"装了插件就掉帧"的主要原因。
-        /// 面板是给人看的，5Hz 已经绰绰有余。
-        /// </summary>
-        private const float RefreshInterval = 0.2f;
+        // ================= 状态 =================
+        private static bool _built;
+        private static GameObject _root;
+        private static RectTransform _rect;
+
+        private static Image _badge;
+        private static Image _shield;
+        private static Text _headerText;
+
+        private static Image _statusChip;
+        private static Image _statusDot;
+        private static Text _statusText;
+
+        private static Text _statPlugins;
+        private static Text _statTrusted;
+        private static Text _statHits;
+
+        private static Text _emptyText;
+
+        private static bool _visible = true;
+        private static bool _visibleInitialized;
+        private static float _firstTickTime = -1f;
         private static float _nextRefreshTime;
 
-        /// <summary>复用的列表，避免每次刷新都 new 一个。</summary>
+        private static readonly List<Row> Rows = new List<Row>(MaxRows);
         private static readonly List<PlayerVerdict> FlaggedBuffer = new List<PlayerVerdict>(16);
 
-        /// <summary>复用的字符串构建器。</summary>
-        private static readonly StringBuilder TextBuffer = new StringBuilder(512);
+        /// <summary>列表行的一组控件引用。</summary>
+        private sealed class Row
+        {
+            public GameObject Root;
+            public Image MarkerBg;
+            public Text MarkerText;
+            public Text Name;
+            public Text Count;
+            public Image BarFill;
+        }
+
+        // ================= 构建 =================
 
         public static void EnsureBuilt(Transform canvasRoot)
         {
@@ -83,113 +128,248 @@ namespace ApexCheatEnder.UI
             var font = UiBuilder.LoadFont(12);
 
             _root = UiBuilder.CreateNode("AceMonitor", canvasRoot);
-            var rect = _root.GetComponent<RectTransform>();
-            UiBuilder.Place(rect,
+            _rect = _root.GetComponent<RectTransform>();
+            UiBuilder.Place(_rect,
                 new Vector2(1f, 1f), new Vector2(1f, 1f),
                 new Vector2(-Margin, -Margin),
                 new Vector2(PanelWidth, PanelHeight));
 
-            // ---- 底板：圆角卡片（9 宫格，圆角不会随尺寸变形） ----
+            // ---- 底板：圆角卡片 ----
             var bg = UiBuilder.CreateImage("Bg", _root.transform, Color.white);
             bg.sprite = AceTheme.Card(CardRadius, 1, AceTheme.PanelBg, AceTheme.Border);
             bg.type = Image.Type.Sliced;
             UiBuilder.Stretch(bg.rectTransform, 0f, 0f, 0f, 0f);
 
-            // ---- 顶部强调条：内缩的圆角条，不再是一条贴边的直线 ----
-            // 贴图用白色生成、靠 Image.color 上色 —— 这样后续要改色只需改 color，
-            // 若把颜色烤进贴图，Image.color 会与之相乘（Success × Danger = 黑）。
-            var topBar = UiBuilder.CreateImage("TopBar", _root.transform, AceTheme.Primary);
-            topBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
-            topBar.type = Image.Type.Sliced;
-            UiBuilder.Place(topBar.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(CardInset, -CardInset), new Vector2(PanelWidth - CardInset * 2f, 3f));
+            BuildHeader(font);
+            BuildDivider("Divider1", Divider1Y);
+            BuildStatChips(font);
+            BuildSectionLabel(font);
+            BuildRows(font);
+            BuildDivider("Divider2", Divider2Y);
+            BuildFooter(font);
 
-            // ---- 盾牌徽标：放在圆角方块底衬里，比裸图标有分量 ----
-            var badge = UiBuilder.CreateImage("Badge", _root.transform, Color.white);
-            badge.sprite = AceTheme.Card(7, 1, AceTheme.BadgeBg, AceTheme.Border);
-            badge.type = Image.Type.Sliced;
-            UiBuilder.Place(badge.rectTransform,
+            // ---- 空态提示：居中在列表区 ----
+            _emptyText = UiBuilder.CreateText("Empty", _root.transform,
+                "当前无人命中规则", font, 11, AceTheme.TextDim,
+                TextAnchor.MiddleCenter);
+            UiBuilder.Place(_emptyText.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(14f, -18f), new Vector2(26f, 26f));
+                new Vector2(PadX, -ListTop),
+                new Vector2(PanelWidth - PadX * 2f, RowHeight * 2f));
+        }
 
+        /// <summary>头部：图标徽章 + 标题 + 状态胶囊。</summary>
+        private static void BuildHeader(Font font)
+        {
+            // 图标徽章：圆角方块 + 粗描边（Amethyst 的签名元素）
+            _badge = UiBuilder.CreateImage("Badge", _root.transform, Color.white);
+            _badge.sprite = AceTheme.Badge((int)BadgeSize, AceTheme.Primary);
+            _badge.type = Image.Type.Sliced;
+            UiBuilder.Place(_badge.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX, -HeaderTop),
+                new Vector2(BadgeSize, BadgeSize));
+
+            // 盾牌徽标压在徽章正中
             var shieldTex = AceTheme.MakeShield(40, AceTheme.Primary, AceTheme.Accent);
             _shield = UiBuilder.CreateImage("Shield", _root.transform, Color.white, shieldTex);
             UiBuilder.Place(_shield.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(17f, -21f), new Vector2(20f, 20f));
+                new Vector2(PadX + 7f, -(HeaderTop + 7f)),
+                new Vector2(16f, 16f));
 
-            // ---- 标题 ----
+            // 标题
             _headerText = UiBuilder.CreateText("Header", _root.transform,
-                "APEX CHEAT ENDER", font, 13, AceTheme.TextMain,
-                TextAnchor.UpperLeft, FontStyle.Bold);
+                "ACE", font, 13, AceTheme.TextMain,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
             UiBuilder.Place(_headerText.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(48f, -19f), new Vector2(200f, 22f));
+                new Vector2(TitleLeft, -HeaderTop),
+                new Vector2(PanelWidth - TitleLeft - StatusChipW - PadX - 10f, BadgeSize));
 
-            // ---- 状态点 ----
-            _statusDot = UiBuilder.CreateText("StatusDot", _root.transform,
-                "● 防护中", font, 11, AceTheme.Success,
-                TextAnchor.UpperRight, FontStyle.Bold);
+            // 状态胶囊：底色芯片 + 圆点 + 文字，比「● 防护中」更像成品控件
+            _statusChip = UiBuilder.CreateImage("StatusChip", _root.transform, Color.white);
+            _statusChip.sprite = AceTheme.Chip(StatusChipH, AceTheme.Success);
+            _statusChip.type = Image.Type.Sliced;
+            UiBuilder.Place(_statusChip.rectTransform,
+                new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-PadX, -(HeaderTop + (BadgeSize - StatusChipH) * 0.5f)),
+                new Vector2(StatusChipW, StatusChipH));
+
+            _statusDot = UiBuilder.CreateImage("Dot", _statusChip.transform, AceTheme.Success);
+            _statusDot.sprite = AceTheme.Dot(7, AceTheme.Success);
             UiBuilder.Place(_statusDot.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(PanelWidth - 146f, -20f), new Vector2(132f, 20f));
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(9f, 0f), new Vector2(7f, 7f));
 
-            // ---- 分隔线（用圆角卡片做，比纯色细线柔和） ----
-            var divider1 = UiBuilder.CreateImage("Divider1", _root.transform, Color.white);
-            divider1.sprite = AceTheme.Card(1, 0, AceTheme.Border, AceTheme.Border);
-            divider1.type = Image.Type.Sliced;
-            UiBuilder.Place(divider1.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(CardInset, -52f), new Vector2(PanelWidth - CardInset * 2f, 1f));
-
-            // ---- 摘要行 ----
-            _summaryText = UiBuilder.CreateText("Summary", _root.transform,
-                "插件 --   信任 --   命中 --", font, 11, AceTheme.TextDim);
-            UiBuilder.Place(_summaryText.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -62f), new Vector2(PanelWidth - 32f, 18f));
-
-            // ---- 排行标题 ----
-            var listTitle = UiBuilder.CreateText("ListTitle", _root.transform,
-                "规则命中", font, 11, AceTheme.Accent, TextAnchor.UpperLeft, FontStyle.Bold);
-            UiBuilder.Place(listTitle.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -86f), new Vector2(200f, 18f));
-
-            // ---- 排行内容 ----
-            _listText = UiBuilder.CreateText("List", _root.transform,
-                "当前无人命中规则", font, 11, AceTheme.TextMain);
-            UiBuilder.Place(_listText.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -106f), new Vector2(PanelWidth - 32f, 96f));
-
-            // ---- 底部分隔线 ----
-            var divider2 = UiBuilder.CreateImage("Divider2", _root.transform, Color.white);
-            divider2.sprite = AceTheme.Card(1, 0, AceTheme.Border, AceTheme.Border);
-            divider2.type = Image.Type.Sliced;
-            UiBuilder.Place(divider2.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(CardInset, -204f), new Vector2(PanelWidth - CardInset * 2f, 1f));
-
-            // ---- 底部提示 ----
-            var hint = UiBuilder.CreateText("Hint", _root.transform,
-                "F8 隐藏面板", font, 10, AceTheme.TextDim, TextAnchor.UpperLeft);
-            UiBuilder.Place(hint.rectTransform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -208f), new Vector2(200f, 16f));
-
-            // ---- 底部状态条：圆角，内缩，不再是贴边直线 ----
-            // 同样用白色贴图 + color 上色，SetGlobalStatus 才能自由改色。
-            _statusBar = UiBuilder.CreateImage("StatusBar", _root.transform, AceTheme.Success);
-            _statusBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
-            _statusBar.type = Image.Type.Sliced;
-            UiBuilder.Place(_statusBar.rectTransform,
-                new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(CardInset, CardInset), new Vector2(PanelWidth - CardInset * 2f, 3f));
+            _statusText = UiBuilder.CreateText("Text", _statusChip.transform,
+                "防护中", font, 11, AceTheme.Success,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
+            UiBuilder.Place(_statusText.rectTransform,
+                new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(21f, 0f), new Vector2(StatusChipW - 25f, StatusChipH));
         }
 
-        /// <summary>每帧刷新。</summary>
+        /// <summary>三枚统计芯片：插件 / 信任 / 命中。</summary>
+        private static void BuildStatChips(Font font)
+        {
+            var w = (PanelWidth - PadX * 2f - ChipGap * 2f) / 3f;
+
+            _statPlugins = BuildStatChip("StatPlugins", font, 0, w);
+            _statTrusted = BuildStatChip("StatTrusted", font, 1, w);
+            _statHits = BuildStatChip("StatHits", font, 2, w);
+        }
+
+        private static Text BuildStatChip(string name, Font font, int index, float width)
+        {
+            var chip = UiBuilder.CreateImage(name, _root.transform, Color.white);
+            chip.sprite = AceTheme.Chip(ChipHeight, AceTheme.Border);
+            chip.type = Image.Type.Sliced;
+            UiBuilder.Place(chip.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX + index * (width + ChipGap), -ChipsTop),
+                new Vector2(width, ChipHeight));
+
+            var text = UiBuilder.CreateText("Text", chip.transform,
+                "--", font, 11, AceTheme.TextMain, TextAnchor.MiddleCenter);
+            UiBuilder.Stretch(text.rectTransform, 2f, 0f, 2f, 0f);
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+            return text;
+        }
+
+        /// <summary>小节标题 + 短强调线（Amethyst 用短横线做分组标记，比整条分隔线轻）。</summary>
+        private static void BuildSectionLabel(Font font)
+        {
+            var label = UiBuilder.CreateText("SectionLabel", _root.transform,
+                "规则命中", font, 11, AceTheme.Accent,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
+            UiBuilder.Place(label.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX, -SectionTop),
+                new Vector2(80f, 16f));
+
+            var rule = UiBuilder.CreateImage("SectionRule", _root.transform, Color.white);
+            rule.sprite = AceTheme.Card(1, 0, AceTheme.Border, AceTheme.Border);
+            rule.type = Image.Type.Sliced;
+            UiBuilder.Place(rule.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX + 68f, -(SectionTop + 7f)),
+                new Vector2(PanelWidth - PadX * 2f - 68f, 1f));
+        }
+
+        private static void BuildRows(Font font)
+        {
+            for (var i = 0; i < MaxRows; i++)
+            {
+                var y = ListTop + i * RowHeight;
+
+                var rowGo = UiBuilder.CreateNode($"Row{i}", _root.transform);
+                var rowRect = rowGo.GetComponent<RectTransform>();
+                UiBuilder.Place(rowRect,
+                    new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(0f, -y),
+                    new Vector2(PanelWidth, RowHeight));
+
+                // 风险标签芯片
+                var markerBg = UiBuilder.CreateImage("Marker", rowGo.transform, Color.white);
+                markerBg.sprite = AceTheme.Chip(MarkerH, AceTheme.Warning);
+                markerBg.type = Image.Type.Sliced;
+                UiBuilder.Place(markerBg.rectTransform,
+                    new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(PadX, -(RowHeight - MarkerH) * 0.5f),
+                    new Vector2(MarkerW, MarkerH));
+
+                var markerText = UiBuilder.CreateText("MarkerText", markerBg.transform,
+                    "", font, 10, AceTheme.Warning, TextAnchor.MiddleCenter, FontStyle.Bold);
+                UiBuilder.Stretch(markerText.rectTransform, 0f, 0f, 0f, 0f);
+
+                // 玩家名
+                var nameText = UiBuilder.CreateText("Name", rowGo.transform,
+                    "", font, 11, AceTheme.TextMain, TextAnchor.MiddleLeft);
+                UiBuilder.Place(nameText.rectTransform,
+                    new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(NameLeft, 0f),
+                    new Vector2(NameW, RowHeight));
+                nameText.horizontalOverflow = HorizontalWrapMode.Wrap;
+                nameText.verticalOverflow = VerticalWrapMode.Truncate;
+                nameText.supportRichText = false;
+
+                // 命中条数（右对齐，与下面的进度条形成固定列）
+                var countText = UiBuilder.CreateText("Count", rowGo.transform,
+                    "", font, 11, AceTheme.TextDim, TextAnchor.MiddleRight);
+                UiBuilder.Place(countText.rectTransform,
+                    new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(CountLeft, 0f),
+                    new Vector2(CountW, RowHeight));
+
+                // 进度条：轨道 + 填充（实心圆角，替代 █░）
+                var track = UiBuilder.CreateImage("BarTrack", rowGo.transform, Color.white);
+                track.sprite = AceTheme.Bar(BarH, AceTheme.Track);
+                track.type = Image.Type.Sliced;
+                UiBuilder.Place(track.rectTransform,
+                    new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(BarLeft, -(RowHeight - BarH) * 0.5f),
+                    new Vector2(BarW, BarH));
+
+                var fill = UiBuilder.CreateImage("BarFill", track.transform, Color.white);
+                fill.sprite = AceTheme.Bar(BarH, AceTheme.Warning);
+                fill.type = Image.Type.Sliced;
+                UiBuilder.Place(fill.rectTransform,
+                    new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    Vector2.zero,
+                    new Vector2(BarW, BarH));
+
+                Rows.Add(new Row
+                {
+                    Root = rowGo,
+                    MarkerBg = markerBg,
+                    MarkerText = markerText,
+                    Name = nameText,
+                    Count = countText,
+                    BarFill = fill,
+                });
+
+                rowGo.SetActive(false);
+            }
+        }
+
+        private static void BuildDivider(string name, float y)
+        {
+            var divider = UiBuilder.CreateImage(name, _root.transform, Color.white);
+            divider.sprite = AceTheme.Card(1, 0, AceTheme.Border, AceTheme.Border);
+            divider.type = Image.Type.Sliced;
+            UiBuilder.Place(divider.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX, -y),
+                new Vector2(PanelWidth - PadX * 2f, 1f));
+        }
+
+        /// <summary>底部：键帽 + 提示（Amethyst 用键帽而不是纯文本写快捷键）。</summary>
+        private static void BuildFooter(Font font)
+        {
+            var capTex = AceTheme.KeyCap(26, 18, AceTheme.BadgeBg, AceTheme.Border, AceTheme.Border);
+            var cap = UiBuilder.CreateImage("KeyCap", _root.transform, Color.white, capTex);
+            UiBuilder.Place(cap.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX, -FooterTop),
+                new Vector2(26f, 18f));
+
+            var capText = UiBuilder.CreateText("KeyCapText", cap.transform,
+                "F8", font, 10, AceTheme.TextMain, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UiBuilder.Place(capText.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(0f, -1f), new Vector2(26f, 15f));
+
+            var hint = UiBuilder.CreateText("Hint", _root.transform,
+                "隐藏面板", font, 10, AceTheme.TextDim, TextAnchor.MiddleLeft);
+            UiBuilder.Place(hint.rectTransform,
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(PadX + 32f, -FooterTop),
+                new Vector2(160f, 18f));
+        }
+
+        // ================= 每帧刷新 =================
+
         public static void Tick()
         {
             if (!_built || _root == null) return;
@@ -233,18 +413,17 @@ namespace ApexCheatEnder.UI
             var verdicts = AntiCheatRuntime.Verdicts;
             if (verdicts == null) return;
 
-            // ---- 摘要 ----
+            // ---- 统计芯片 ----
             var report = AntiCheatRuntime.ScanReport;
             var pluginCount = report?.AllPlugins.Count ?? 0;
             var trustedCount = report?.TrustedPlugins.Count ?? 0;
             var suspiciousCount = report?.Violations.Count ?? 0;
 
-            _summaryText.text = $"插件 {pluginCount}   信任 {trustedCount}   命中 {suspiciousCount}";
+            _statPlugins.text = $"插件 {pluginCount}";
+            _statTrusted.text = $"信任 {trustedCount}";
+            _statHits.text = $"命中 {suspiciousCount}";
 
             // ---- 依据「规则命中」而不是分数来筛选与标记 ----
-            // RankedVerdicts 返回所有被追踪过的玩家（含零证据的），
-            // 必须先用 EvaluateLevel 做一次判定，只有判定成立的才进入列表。
-            var cfg = AntiCheatRuntime.Config;
             var ranked = verdicts.RankedVerdicts();
 
             var flagged = FlaggedBuffer;
@@ -260,10 +439,13 @@ namespace ApexCheatEnder.UI
 
             if (flagged.Count == 0)
             {
-                _listText.text = "当前无人命中规则";
+                foreach (var r in Rows) r.Root.SetActive(false);
+                _emptyText.gameObject.SetActive(true);
                 SetGlobalStatus(RiskLevel.Normal);
                 return;
             }
+
+            _emptyText.gameObject.SetActive(false);
 
             // 按风险等级降序，同级按命中条数降序
             flagged.Sort((a, b) =>
@@ -273,92 +455,97 @@ namespace ApexCheatEnder.UI
                 return la != lb ? lb.CompareTo(la) : b.EvidenceCount.CompareTo(a.EvidenceCount);
             });
 
-            // 条形图以命中条数为满格基准
-            var scale = 1f;
+            // 进度条以命中条数为满格基准
+            var scale = 1;
             foreach (var v in flagged)
                 if (v.EvidenceCount > scale) scale = v.EvidenceCount;
 
-            var sb = TextBuffer;
-            sb.Clear();
-            var rows = Mathf.Min(flagged.Count, MaxRows);
-            for (var i = 0; i < rows; i++)
+            for (var i = 0; i < Rows.Count; i++)
             {
-                var v = flagged[i];
-                var level = v.EvaluateLevel();
-
-                sb.Append(MarkerOf(level)).Append(' ')
-                  .Append(v.Name).Append("  ")
-                  .Append("命中 ").Append(v.EvidenceCount).Append(" 条  ")
-                  .Append(BuildBar(v.EvidenceCount / scale));
-
-                // AI 确认过的额外展示结论摘要
-                if (level == RiskLevel.Confirmed && !string.IsNullOrEmpty(v.AiSummary))
+                var row = Rows[i];
+                if (i >= flagged.Count)
                 {
-                    sb.AppendLine().Append("    AI: ").Append(v.AiSummary);
+                    row.Root.SetActive(false);
+                    continue;
                 }
 
-                if (i < rows - 1) sb.AppendLine();
+                var v = flagged[i];
+                var level = v.EvaluateLevel();
+                var color = ColorOf(level);
+
+                row.Root.SetActive(true);
+
+                // 标签芯片：底色不变，只换描边色与文字色，避免引入新配色
+                row.MarkerBg.sprite = AceTheme.Chip(MarkerH, color);
+                row.MarkerText.text = MarkerOf(level);
+                row.MarkerText.color = color;
+
+                row.Name.text = v.Name;
+                row.Count.text = $"{v.EvidenceCount} 条";
+
+                // 进度条：按命中条数占满格比例
+                var ratio = Mathf.Clamp01(v.EvidenceCount / (float)scale);
+                var w = Mathf.Max(BarH, BarW * ratio);
+                row.BarFill.sprite = AceTheme.Bar(BarH, color);
+                var fr = row.BarFill.rectTransform;
+                fr.sizeDelta = new Vector2(w, BarH);
+                fr.anchoredPosition = Vector2.zero;
             }
 
-            _listText.text = sb.ToString();
             SetGlobalStatus(maxLevel);
         }
 
-        /// <summary>各风险等级在列表里显示的标记文字。</summary>
-        private static string MarkerOf(RiskLevel level) => level switch
+        /// <summary>各风险等级对应的语义色（全部取自 AceTheme，不新增颜色）。</summary>
+        private static Color ColorOf(RiskLevel level) => level switch
         {
-            RiskLevel.Confirmed  => "[已确认]",
-            RiskLevel.HighRisk   => "[高危]",
-            RiskLevel.Suspicious => "[命中]",
-            _                    => "[正常]",
+            RiskLevel.Confirmed  => AceTheme.Danger,
+            RiskLevel.HighRisk   => AceTheme.Danger,
+            RiskLevel.Suspicious => AceTheme.Warning,
+            _                    => AceTheme.Success,
         };
 
-        /// <summary>用 Unicode 方块拼一个横向条形图。</summary>
-        private static string BuildBar(float ratio)
+        /// <summary>各风险等级在列表里显示的标签文字。</summary>
+        private static string MarkerOf(RiskLevel level) => level switch
         {
-            var filled = Mathf.Clamp(Mathf.RoundToInt(ratio * BarLength), 0, BarLength);
-            var sb = new StringBuilder(BarLength);
-            for (var i = 0; i < BarLength; i++) sb.Append(i < filled ? '█' : '░');
-            return sb.ToString();
-        }
+            RiskLevel.Confirmed  => "已确认",
+            RiskLevel.HighRisk   => "高危",
+            RiskLevel.Suspicious => "命中",
+            _                    => "正常",
+        };
 
-        /// <summary>
-        /// 按**判定结果**切换整体状态展示。
-        /// 入参是 RiskLevel——标记必须建立在规则命中之上。
-        /// </summary>
+        /// <summary>按判定结果切换头部状态胶囊与徽章配色。</summary>
         private static void SetGlobalStatus(RiskLevel level)
         {
-            Color color;
-            string text;
-
-            switch (level)
+            var color = ColorOf(level);
+            var text = level switch
             {
-                case RiskLevel.Confirmed:
-                    color = AceTheme.Danger;
-                    text = "● 已确认作弊";
-                    break;
-                case RiskLevel.HighRisk:
-                    color = AceTheme.Danger;
-                    text = "● 高危";
-                    break;
-                case RiskLevel.Suspicious:
-                    color = AceTheme.Warning;
-                    text = "● 规则命中";
-                    break;
-                default:
-                    color = AceTheme.Success;
-                    text = "● 防护中";
-                    break;
-            }
+                RiskLevel.Confirmed  => "已确认作弊",
+                RiskLevel.HighRisk   => "高危",
+                RiskLevel.Suspicious => "规则命中",
+                _                    => "防护中",
+            };
+
+            if (_statusChip != null)
+                _statusChip.sprite = AceTheme.Chip(StatusChipH, color);
 
             if (_statusDot != null)
             {
-                _statusDot.text = text;
+                _statusDot.sprite = AceTheme.Dot(7, color);
                 _statusDot.color = color;
             }
 
-            if (_statusBar != null) _statusBar.color = color;
-            if (_shield != null) _shield.color = level >= RiskLevel.Suspicious ? color : Color.white;
+            if (_statusText != null)
+            {
+                _statusText.text = text;
+                _statusText.color = color;
+            }
+
+            // 徽章描边随状态变色，头部一眼能看出「现在是安全还是告警」
+            if (_badge != null)
+                _badge.sprite = AceTheme.Badge((int)BadgeSize, color);
+
+            if (_shield != null)
+                _shield.color = level >= RiskLevel.Suspicious ? color : Color.white;
         }
     }
 }

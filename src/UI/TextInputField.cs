@@ -88,7 +88,7 @@ namespace ApexCheatEnder.UI
             _fieldRect = node.GetComponent<RectTransform>();
             UiBuilder.Place(_fieldRect,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(0f, 0f), new Vector2(360f, FieldHeight));
+                new Vector2(0f, 0f), new Vector2(_host.rect.width, FieldHeight));
 
             _fieldBg = UiBuilder.CreateImage("FieldBg", node.transform, Color.white);
             _fieldBg.sprite = AceTheme.Card(8, 1, AceTheme.FieldBg, AceTheme.Border);

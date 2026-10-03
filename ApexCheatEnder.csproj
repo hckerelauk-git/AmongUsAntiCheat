@@ -181,6 +181,7 @@
       否则会被一起编进插件导致「定义了多个入口点」。
     -->
     <Compile Remove="tests/**" />
+    <Compile Remove="src/Core/Ai/**;src/Core/Rpc/RpcAiAnalyzer.cs;src/Core/Rpc/RpcAiClient.cs;src/UI/MonitorPanel.cs" />
     <None Remove="tests/**" />
   </ItemGroup>
 
@@ -192,6 +193,14 @@
     -->
     <EmbeddedResource Include="src\Resources\MainMenuArt.jpg"
                       LogicalName="ApexCheatEnder.MainMenuArt.jpg" />
+    <EmbeddedResource Include="src\Resources\MainMenuArt01.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt01.jpg" />
+    <EmbeddedResource Include="src\Resources\MainMenuArt02.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt02.jpg" />
+    <EmbeddedResource Include="src\Resources\MainMenuArt03.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt03.jpg" />
+    <EmbeddedResource Include="src\Resources\SuspiciousAlert.jpg"
+                      LogicalName="ApexCheatEnder.ChatAbuseNotice.jpg" />
   </ItemGroup>
 
   <!-- ================= 编译后自动部署 ================= -->

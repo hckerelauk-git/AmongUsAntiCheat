@@ -28,6 +28,15 @@
 
   <ItemGroup>
     <!-- 被测的纯逻辑源码（直接编入，不经过插件产物） -->
+    <Compile Include="..\src\Core\LocalDiagnostics.cs" Link="sut\LocalDiagnostics.cs" />
+    <Compile Include="..\src\Config\AntiCheatConfig.cs" Link="sut\AntiCheatConfig.cs" />
+    <Reference Include="BepInEx.Core">
+      <HintPath>E:/STEAM/steamapps/common/Among Us/BepInEx/core/BepInEx.Core.dll</HintPath>
+    </Reference>
+    <Compile Include="..\src\Core\SettingsLayout.cs" Link="sut\SettingsLayout.cs" />
+    <Compile Include="..\src\Core\MenuArtSource.cs" Link="sut\MenuArtSource.cs" />
+    <Compile Include="..\src\Core\ChatAbuseNoticePolicy.cs" Link="sut\ChatAbuseNoticePolicy.cs" />
+    <Compile Include="..\src\Core\ChatRepeatNoticePolicy.cs" Link="sut\ChatRepeatNoticePolicy.cs" />
     <Compile Include="..\src\Core\GameVec2.cs" Link="sut\GameVec2.cs" />
     <Compile Include="..\src\Core\PlayerTrack.cs" Link="sut\PlayerTrack.cs" />
     <Compile Include="..\src\Core\Violation.cs" Link="sut\Violation.cs" />

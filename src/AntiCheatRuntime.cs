@@ -30,11 +30,8 @@ namespace ApexCheatEnder
         public static VerdictEngine Verdicts { get; private set; }
         public static ModScanner Scanner { get; private set; }
 
-        /// <summary>RPC 事件采集器（用于 AI 分析与事后追溯）。</summary>
+        /// <summary>RPC 事件采集器（用于事后追溯）。</summary>
         public static Core.RpcEventRecorder Recorder { get; private set; }
-
-        /// <summary>AI 分析编排器（异步调大模型二次研判）。</summary>
-        public static Core.RpcAiAnalyzer AiAnalyzer { get; private set; }
 
         /// <summary>配置文件热重载器：记事本改完保存后几秒内自动生效，不用重启。</summary>
         public static Core.ConfigHotReloader HotReloader { get; private set; }
@@ -74,6 +71,23 @@ namespace ApexCheatEnder
         private static readonly System.Diagnostics.Stopwatch PerfWatch = new System.Diagnostics.Stopwatch();
         private static double _perfAccumMs;
         private static int _perfFrames;
+        private static float _fpsElapsed;
+        private static int _fpsFrames;
+        public static float CurrentFps { get; private set; }
+        public static double AverageTickMs { get; private set; }
+
+        public static string ExportDiagnostics()
+        {
+            try
+            {
+                var directory = System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath, "ACELogs");
+                System.IO.Directory.CreateDirectory(directory);
+                var path = System.IO.Path.Combine(directory, "diagnostics-" + System.DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".txt");
+                System.IO.File.WriteAllText(path, Verdicts.History.SafeExport(CurrentFps), System.Text.Encoding.UTF8);
+                return "已导出到 BepInEx/ACELogs";
+            }
+            catch { return "导出失败，请检查日志目录权限"; }
+        }
         private static float _nextPerfReportTime;
 
         /// <summary>单帧开销告警阈值（毫秒）。超过它说明本模组在拖后腿。</summary>
@@ -98,7 +112,6 @@ namespace ApexCheatEnder
             Scanner = scanner;
 
             Recorder = new Core.RpcEventRecorder();
-            AiAnalyzer = new Core.RpcAiAnalyzer(config, Recorder);
             RpcFlood = new Core.Rpc.RpcFloodGuard(log);
 
             // 热重载器：监视配置文件外部改动，改完保存自动生效。
@@ -198,17 +211,8 @@ namespace ApexCheatEnder
         public static void Shutdown()
         {
             if (Verdicts != null) Verdicts.KickRequested -= HandleKickRequested;
-        }
-
-        /// <summary>每帧调用：整个检测循环的驱动入口。</summary>
-        // ================= AI 分析驱动 =================
-
-        /// <summary>
-        /// 把异步 AI 产物从内部队列回收到 VerdictEngine（主线程调用）。
-        /// </summary>
-        private static void DrainAiResults()
-        {
-            AiAnalyzer?.DrainPending(Verdicts);
+            UI.MainMenuArt.Shutdown();
+            UI.ChatAbuseNotice.Shutdown();
         }
 
         /// <summary>
@@ -258,6 +262,14 @@ namespace ApexCheatEnder
         {
             if (!IsReady) return;
 
+            _fpsElapsed += Time.unscaledDeltaTime;
+            _fpsFrames++;
+            if (_fpsElapsed >= 1f)
+            {
+                CurrentFps = _fpsFrames / _fpsElapsed;
+                _fpsElapsed = 0f;
+                _fpsFrames = 0;
+            }
             // 性能探针：只统计本模组自身的开销，不含游戏逻辑
             var probing = Config?.PerfProbe?.Value ?? false;
             if (probing) PerfWatch.Restart();
@@ -284,6 +296,7 @@ namespace ApexCheatEnder
 
             if (_perfFrames == 0) return;
             var avg = _perfAccumMs / _perfFrames;
+            AverageTickMs = avg;
             _perfAccumMs = 0;
             _perfFrames = 0;
 
@@ -326,7 +339,6 @@ namespace ApexCheatEnder
             {
                 // 不在对局中也要驱动，保持调用方契约
                 Verdicts.Tick(now, deltaTime);
-                DrainAiResults();
                 return;
             }
 
@@ -341,9 +353,6 @@ namespace ApexCheatEnder
 
             // 衰减
             Verdicts.Tick(now, deltaTime);
-
-            // 把异步 AI 产物回收到 VerdictEngine（主线程）
-            DrainAiResults();
 
             // 判定等级升级 → 右下角弹通知（节流到 5Hz，避免每帧全量遍历）
             if (now >= _nextRiskCheckTime)
@@ -412,9 +421,6 @@ namespace ApexCheatEnder
 
                 foreach (var v in EvidenceBuffer) Verdicts.Submit(v, now);
 
-                // 提交证据后让 AI 分析器评估是否触发异步分析。
-                // 必须放在 Submit 之后——否则 AiAnalyzer 看到的命中条数还没到门槛。
-                AiAnalyzer?.MaybeAnalyze(Verdicts.TryGet(playerId, out var vd) ? vd : null);
             }
         }
 

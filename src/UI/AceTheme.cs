@@ -494,5 +494,127 @@ namespace ApexCheatEnder.UI
             clip.SetData(data, 0);
             return clip;
         }
+
+        // ================= 版式构件（参考 Amethyst 的视觉语言） =================
+        //
+        // 说明：本节只提供**结构与比例**上的构件，全部复用上面已有的配色常量，
+        // 不引入任何新颜色。Amethyst 的界面辨识度主要来自：
+        //   1. 圆角方块图标徽章 + 粗描边（而不是裸图标）
+        //   2. 胶囊状的「芯片」承载状态与标签（而不是 ● 加纯文本）
+        //   3. 实心圆角进度条（而不是 Unicode █░ 方块字符）
+        //   4. 键帽样式的快捷键提示
+        // 这里把这四类构件抽出来，供各面板共用。
+
+        /// <summary>
+        /// 图标徽章的圆角半径（相对边长的比例）。
+        /// Amethyst 的图标是「深色圆角方块 + 粗描边」，圆角约占边长的 30%，
+        /// 比常见的 15% 明显更圆，这是它一眼可辨的特征之一。
+        /// </summary>
+        public const float BadgeRadiusRatio = 0.30f;
+
+        /// <summary>图标徽章的描边宽度（像素）。Amethyst 用的是粗描边，不是发丝线。</summary>
+        public const int BadgeBorderWidth = 2;
+
+        /// <summary>
+        /// 取图标徽章的 9 宫格 Sprite。
+        /// 底色用 <see cref="BadgeBg"/>，描边用传入的语义色（主色 / 危险色 / 强调色…），
+        /// 这样同一套构件能表达不同状态而不需要新配色。
+        /// </summary>
+        /// <param name="size">徽章边长（像素），用于反推圆角半径。</param>
+        /// <param name="edge">描边色（通常传 Primary / Danger / Success）。</param>
+        public static Sprite Badge(int size, Color edge)
+        {
+            var radius = Mathf.Max(3, Mathf.RoundToInt(size * BadgeRadiusRatio));
+            return Card(radius, BadgeBorderWidth, BadgeBg, edge);
+        }
+
+        /// <summary>取胶囊「芯片」的 9 宫格 Sprite（圆角 = 高度的一半，即正胶囊）。</summary>
+        /// <param name="height">芯片高度（像素）。</param>
+        /// <param name="edge">描边色；传透明色表示不要描边。</param>
+        public static Sprite Chip(float height, Color edge)
+        {
+            var radius = Mathf.Max(2, Mathf.RoundToInt(height * 0.5f));
+            var hasEdge = edge.a > 0.001f;
+            return Card(radius, hasEdge ? 1 : 0, BadgeBg, hasEdge ? edge : BadgeBg);
+        }
+
+        /// <summary>取实心圆角进度条的 9 宫格 Sprite（轨道 / 填充共用）。</summary>
+        /// <param name="thickness">条高（像素）。</param>
+        /// <param name="color">填充色。</param>
+        public static Sprite Bar(float thickness, Color color)
+        {
+            var radius = Mathf.Max(2, Mathf.RoundToInt(thickness * 0.5f));
+            return Card(radius, 0, color, color);
+        }
+
+        /// <summary>
+        /// 生成键帽纹理（快捷键提示用）。
+        ///
+        /// Amethyst 用键帽而不是纯文本写快捷键。键帽的立体感来自
+        /// 「上表面 + 下沿阴影」两层，这里直接把下沿画进同一张贴图，
+        /// 避免为每个键帽多挂一个 Image。
+        /// </summary>
+        /// <param name="w">键帽宽（像素）。</param>
+        /// <param name="h">键帽高（像素）。</param>
+        /// <param name="face">上表面色。</param>
+        /// <param name="lip">下沿色。</param>
+        /// <param name="edge">描边色。</param>
+        public static Texture2D MakeKeyCap(int w, int h, Color face, Color lip, Color edge)
+        {
+            if (w < 8) w = 8;
+            if (h < 8) h = 8;
+
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            var pixels = new Color[w * h];
+            var transparent = new Color(0f, 0f, 0f, 0f);
+
+            const float LipHeight = 3f;   // 下沿厚度
+            const float Radius = 4f;
+
+            for (var y = 0; y < h; y++)
+            {
+                for (var x = 0; x < w; x++)
+                {
+                    var px = x + 0.5f;
+                    var py = y + 0.5f;
+
+                    // 整块键帽的圆角矩形（含下沿）
+                    if (!InsideRoundedRect(px, py, 0f, 0f, w, h, Radius))
+                    {
+                        pixels[y * w + x] = transparent;
+                        continue;
+                    }
+
+                    // 上表面：去掉下沿 LipHeight 之后的区域
+                    var inFace = InsideRoundedRect(px, py, 0f, LipHeight, w, h - LipHeight, Radius);
+                    pixels[y * w + x] = inFace ? face : lip;
+
+                    // 描边：距边界 1px 内
+                    var nearEdge =
+                        !InsideRoundedRect(px, py, 1f, 1f, w - 2f, h - 2f, Mathf.Max(1f, Radius - 1f));
+                    if (nearEdge) pixels[y * w + x] = edge;
+                }
+            }
+
+            tex.SetPixels(pixels);
+            tex.Apply();
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            return tex;
+        }
+
+        private static readonly System.Collections.Generic.Dictionary<string, Texture2D> KeyCapCache
+            = new System.Collections.Generic.Dictionary<string, Texture2D>();
+
+        /// <summary>带缓存的键帽纹理。</summary>
+        public static Texture2D KeyCap(int w, int h, Color face, Color lip, Color edge)
+        {
+            var key = w + "|" + h + "|" + ColorKey(face) + "|" + ColorKey(lip) + "|" + ColorKey(edge);
+            if (KeyCapCache.TryGetValue(key, out var cached) && cached != null) return cached;
+
+            var tex = MakeKeyCap(w, h, face, lip, edge);
+            KeyCapCache[key] = tex;
+            return tex;
+        }
     }
 }

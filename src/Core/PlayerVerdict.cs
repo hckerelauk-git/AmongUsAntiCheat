@@ -71,6 +71,7 @@ namespace ApexCheatEnder.Core
         public void AddEvidence(Violation v)
         {
             if (v == null) return;
+            if (Evidence.Count >= 128) Evidence.RemoveAt(0);
             Evidence.Add(v);
             EvidenceCount++;
             if (v.Severity == Severity.Critical) CriticalCount++;
@@ -83,6 +84,10 @@ namespace ApexCheatEnder.Core
             Warned = false;
             KickIssued = false;
             BanRequested = false;
+            LastNotifiedLevel = RiskLevel.Normal;
+            AiConfirmed = false;
+            AiSummary = null;
+            AiConfidence = 0;
             Evidence.Clear();
         }
     }

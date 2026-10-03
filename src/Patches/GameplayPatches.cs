@@ -232,7 +232,7 @@ namespace ApexCheatEnder.Patches
     //  聊天
     // ======================================================================
 
-    /// <summary>聊天消息：刷屏与内容合法性。</summary>
+    /// <summary>聊天消息：独立本地疑似骂人提示；原有刷屏与内容合法性分析保持不变。</summary>
     [HarmonyPatch]
     internal static class SendChatPatch
     {
@@ -259,6 +259,21 @@ namespace ApexCheatEnder.Patches
                 foreach (var v in buffer) AntiCheatRuntime.Submit(v);
                 AntiCheatRuntime.Recorder?.Record(id, "SendChat");
             });
+        }
+    }
+
+    // 在聊天呈现入口观察，覆盖本地发送和远端接收；不与 RpcSendChat 重复计数。
+    [HarmonyPatch]
+    internal static class ChatNoticePatch
+    {
+        private static MethodBase TargetMethod() =>
+            PatchHelper.FindByName(typeof(ChatController), "AddChat");
+
+        private static void Postfix(object[] __args)
+        {
+            PatchHelper.Safe(() => UI.ChatAbuseNotice.Observe(
+                GameBridge.GetPlayerId(PatchHelper.FirstArgOfType<PlayerControl>(__args)),
+                PatchHelper.FirstArgOfType<string>(__args)));
         }
     }
 
