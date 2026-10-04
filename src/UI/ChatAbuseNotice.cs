@@ -45,7 +45,10 @@ namespace ApexCheatEnder.UI
                 if (inSession && !escape && canvasRoot != null && cfg != null &&
                     RepeatPolicy.TryNotice(message.PlayerId, message.Text, cfg.ShowRepeatedChatNotice.Value, now, cfg.RepeatedChatThreshold.Value))
                     NotificationPanel.Show("重复聊天提示", "同一玩家短时间重复发送相同消息，仅供本地参考，不计作弊。", AceTheme.Warning, 2f);
-                if (enabled && inSession && !escape && canvasRoot != null &&
+                // 自己发的消息不提示 —— 那句话是你自己打的，不需要插件来提醒你。
+                // 原来的实现没有排除本机玩家，自己复述一次关键词就会弹。
+                var fromSelf = message.PlayerId >= 0 && message.PlayerId == GameBridge.GetPlayerId(GameBridge.GetLocalPlayer());
+                if (enabled && inSession && !escape && canvasRoot != null && !fromSelf &&
                     _policy.TryShow(message.Text, cfg.ChatAbuseKeywords.Value, enabled, now))
                     trigger = true;
             }

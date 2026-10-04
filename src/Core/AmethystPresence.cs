@@ -42,6 +42,9 @@ namespace ApexCheatEnder.Core
         /// <summary>Amethyst 的固定标识串。</summary>
         private const string Marker = "AMETHYST_MOD_CLIENT_V1";
 
+        /// <summary>Amethyst 的 BepInEx 插件 GUID。它的互认包不带 GUID，这是反编译确认后填的。</summary>
+        internal const string AmethystGuid = "amethyst.mod";
+
         /// <summary>默认标记文案。常量集中在 <see cref="PresenceTags"/>。</summary>
         public const string DefaultTag = PresenceTags.AmethystDefault;
 
@@ -86,6 +89,10 @@ namespace ApexCheatEnder.Core
                 // 忽略自己：部分版本会把本机广播回送一遍。
                 var local = GameBridge.GetLocalPlayer();
                 if (local != null && local.PlayerId == claimedId) return true;
+
+                // 登记到模组指纹库：它自报了身份，直接登记。
+                // 注意它的互认包本身**不带 GUID**（反编译确认），GUID 是我们按已知事实填的。
+                ModFingerprint.Announce(claimedId, AmethystGuid);
 
                 if (AmethystPlayers.Add(claimedId))
                 {

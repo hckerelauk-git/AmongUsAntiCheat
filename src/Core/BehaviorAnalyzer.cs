@@ -31,6 +31,17 @@ namespace ApexCheatEnder.Core
         private const float MeetingMoveReportCooldown = 1.0f;
 
         /// <summary>
+        /// 入会后的豁免时长（秒）。
+        ///
+        /// 会议一开始，游戏会把**所有人**瞬间传送到会议桌 —— 这是一次巨大的位移。
+        /// 好友现场日志里，会议开始那一瞬 10 个玩家全部命中 MoveDuringMeeting
+        /// （位移 3.15 ~ 21.43 单位），显然是传送而不是「会议期间走动」。
+        ///
+        /// 1 秒足够覆盖传送落位与随后的位置同步抖动；再往后还有位移就是真的在动了。
+        /// </summary>
+        private const float MeetingEnterGrace = 3.0f;
+
+        /// <summary>
         /// 瞬移判定的速度倍率：隐含速度必须超过「允许上限 × 该倍率」才算瞬移。
         /// 取 3 倍是为了给「速度上限本身估算偏低」留出余量，进一步压低误报。
         /// </summary>
@@ -84,8 +95,9 @@ namespace ApexCheatEnder.Core
                 return;
             }
 
-            // 通风管内部是合法的空间跳跃，直接重置计数并标记豁免
-            if (cur.InVent)
+            // 管道 / 梯子 / 移动平台都会产生合法大位移，直接重置计数并标记豁免。
+            // 只判 InVent 是不够的 —— 爬梯子和飞艇的移动平台同样会让位移超标。
+            if (cur.InVent || cur.InSpecialMovement)
             {
                 track.ConsecutiveSpeedStrikes = 0;
                 track.LastLegalTeleportTime = now;
@@ -169,7 +181,20 @@ namespace ApexCheatEnder.Core
             // ---------- 判定三：穿墙（可选，开销较高） ----------
             if (_cfg.EnableWallClipCheck.Value && IsInsideWall != null)
             {
-                if (now - track.LastWallClipReportTime >= WallClipReportCooldown && IsInsideWall(cur.Position))
+                var insideWall = IsInsideWall(cur.Position);
+                if (!insideWall)
+                {
+                    // 这一帧不在墙里 → 清空连续计数。
+                    // 擦边一次不算，真的穿墙会持续待在里面。
+                    track.ConsecutiveWallStrikes = 0;
+                }
+                else
+                {
+                    track.ConsecutiveWallStrikes++;
+                }
+
+                if (now - track.LastWallClipReportTime >= WallClipReportCooldown &&
+                    insideWall && track.ConsecutiveWallStrikes >= 2)
                 {
                     track.LastWallClipReportTime = now;
                     output.Add(new Violation(
@@ -255,7 +280,11 @@ namespace ApexCheatEnder.Core
             var tolerance = _cfg.KillDistanceTolerance.Value;
 
             // ---------- 角色校验：非内鬼执行击杀 ----------
-            if (!killer.Current.IsImpostor && !killer.Current.IsDead)
+            //
+            // 必须等角色信息同步到位才能判。
+            // 角色未知时 IsImpostor 恒为 false，直接判会把开局阶段正常玩家的击杀
+            // 误报成「非内鬼击杀」—— 破坏判定那边早就加了 RoleKnown 守卫，这里漏了。
+            if (killer.Current.RoleKnown && !killer.Current.IsImpostor && !killer.Current.IsDead)
             {
                 output.Add(new Violation(
                     ViolationKind.KillWhileNotImpostor,
@@ -429,10 +458,34 @@ namespace ApexCheatEnder.Core
         {
             if (track == null || !track.HasPrevious) return;
             if (track.Current.IsDead) return;
+
+            // ---- 两道闸，专门挡掉「入会传送」这个必然发生的位移 ----
+            //
+            // 闸一：上一帧还不在会议里 → 这一帧就是入会那一跳，跳过。
+            // 只判 Current.InMeeting 是不够的：入会样本本身 Current 已经是 true 了。
+            if (!track.Previous.InMeeting) return;
+
+            // 闸二：仍在合法传送豁免窗口内 → 跳过。
+            // 会议开始时 OnMeetingStarted 会给所有人打上 LastLegalTeleportTime，
+            // 但这里以前根本没读它，豁免等于白设。
+            if (track.IsInLegalTeleportWindow(now, MeetingEnterGrace)) return;
+
             if (now - track.LastMeetingMoveReportTime < MeetingMoveReportCooldown) return;
 
             var distance = track.Current.DeltaDistance;
-            if (distance <= _cfg.MeetingMoveTolerance.Value) return;
+            if (distance <= _cfg.MeetingMoveTolerance.Value)
+            {
+                // 这一帧没动 → 清空连续计数。
+                // 入会传送是「一跳就停」，清空后它永远攒不满两次，自然不报。
+                track.ConsecutiveMeetingMoveStrikes = 0;
+                return;
+            }
+
+            // 必须**连续**超容差才算。
+            // 单次大位移区分不了「被传送到会议桌」和「真的在动」——
+            // 前者是必发的一次性尖峰，后者会持续。
+            track.ConsecutiveMeetingMoveStrikes++;
+            if (track.ConsecutiveMeetingMoveStrikes < 2) return;
 
             track.LastMeetingMoveReportTime = now;
             track.FlaggedThisRound = true;

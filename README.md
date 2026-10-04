@@ -1,5 +1,7 @@
 # Apex Cheat Ender
 
+> 🌐 **官网：<https://ace.elauk.top>** —— 最新版本、下载与更新日志都在这。
+
 Among Us 客户端反作弊插件。基于 **BepInEx 6（IL2CPP）+ Harmony**，以「规则命中」模型对房间内的
 RPC 与玩家行为做语义级校验，在房主侧拦截作弊并给出可解释的判定依据。
 

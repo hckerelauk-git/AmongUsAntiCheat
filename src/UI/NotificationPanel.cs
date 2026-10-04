@@ -18,7 +18,13 @@ namespace ApexCheatEnder.UI
     /// </summary>
     internal static class NotificationPanel
     {
-        private const int SlotCount = 3;
+        /// <summary>
+        /// 同时存在的通知卡片数。
+        ///
+        /// 原来 3 个。停留时长放宽到 12 秒后，3 个不够用 ——
+        /// 持续作弊的玩家每 6 秒会再提示一次，旧卡片很快被挤掉，反而看不清。
+        /// </summary>
+        private const int SlotCount = 5;
         private const float CardWidth = 348f;
         private const float CardHeight = 70f;
         private const float Margin = 18f;
@@ -77,17 +83,30 @@ namespace ApexCheatEnder.UI
                 new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                 new Vector2(7f, 0f), new Vector2(4f, CardHeight - 18f));
 
+            // 反作弊图标。拿不到就退回原来的左边距，文字位置不受影响。
+            var iconTex = AceTheme.Icon();
+            var textLeft = 16f;
+            if (iconTex != null)
+            {
+                var icon = UiBuilder.CreateImage("Icon", go.transform, Color.white, iconTex);
+                icon.raycastTarget = false;
+                UiBuilder.Place(icon.rectTransform,
+                    new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(18f, 0f), new Vector2(30f, 30f));
+                textLeft = 56f;
+            }
+
             var title = UiBuilder.CreateText("Title", go.transform,
                 "", font, 13, AceTheme.TextMain, TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(title.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -10f), new Vector2(CardWidth - 32f, 20f));
+                new Vector2(textLeft, -10f), new Vector2(CardWidth - textLeft - 16f, 20f));
 
             var message = UiBuilder.CreateText("Message", go.transform,
                 "", font, 12, AceTheme.TextDim, TextAnchor.UpperLeft);
             UiBuilder.Place(message.rectTransform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -32f), new Vector2(CardWidth - 32f, 32f));
+                new Vector2(textLeft, -32f), new Vector2(CardWidth - textLeft - 16f, 32f));
 
             return new Slot
             {

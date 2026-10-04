@@ -40,9 +40,54 @@ namespace ApexCheatEnder.Core
 
         /// <summary>
         /// 已经弹过通知的风险等级。
-        /// 用于「只在等级升级时提示一次」，避免同一玩家每帧刷屏。
+        ///
+        /// 注意：**不能只用它来去重**。早期实现是「等级没升就不弹」，
+        /// 结果一个玩家一旦升到高风险，之后所有作弊都被静默 ——
+        /// 现场表现就是「通知只爆一次，后面的作弊就不管了」。
+        /// 现在它只负责判断「是否升级」，重复提示的节流交给
+        /// <see cref="LastNotifiedEvidenceCount"/> 与 <see cref="LastNotifyTime"/>。
         /// </summary>
         public RiskLevel LastNotifiedLevel { get; set; } = RiskLevel.Normal;
+
+        /// <summary>上次弹通知时的证据条数。证据增加说明又有新作弊，需要再提示。</summary>
+        public int LastNotifiedEvidenceCount { get; set; }
+
+        /// <summary>上次弹通知的时刻，用于重复提示的冷却。</summary>
+        public float LastNotifyTime { get; set; } = float.NegativeInfinity;
+
+        /// <summary>
+        /// 判断此刻是否应该为这个玩家弹通知。
+        ///
+        /// 抽成纯静态函数是为了能脱离 Unity 直接测 —— 通知频率这块出过
+        /// 「只爆一次、后续作弊全静默」的线上问题，必须锁死。
+        /// </summary>
+        /// <param name="level">当前风险等级。</param>
+        /// <param name="lastNotifiedLevel">上次弹通知时的等级。</param>
+        /// <param name="evidenceCount">当前证据条数。</param>
+        /// <param name="lastNotifiedEvidenceCount">上次弹通知时的证据条数。</param>
+        /// <param name="now">当前时刻。</param>
+        /// <param name="lastNotifyTime">上次弹通知的时刻。</param>
+        /// <param name="repeatInterval">重复提示的最小间隔（秒）。</param>
+        public static bool ShouldNotify(
+            RiskLevel level,
+            RiskLevel lastNotifiedLevel,
+            int evidenceCount,
+            int lastNotifiedEvidenceCount,
+            float now,
+            float lastNotifyTime,
+            float repeatInterval)
+        {
+            // 正常状态不弹
+            if (level <= RiskLevel.Normal) return false;
+
+            // 等级升级：必弹。这是首次发现，或风险从可疑升到高。
+            if (level > lastNotifiedLevel) return true;
+
+            // 等级没变，但又有新证据，且冷却已过 → 再弹一次。
+            // 没有这一条，玩家升到高风险之后的所有作弊都会被静默。
+            return evidenceCount > lastNotifiedEvidenceCount &&
+                   now - lastNotifyTime >= repeatInterval;
+        }
 
         public List<Violation> Evidence { get; } = new List<Violation>(16);
 
@@ -85,6 +130,8 @@ namespace ApexCheatEnder.Core
             KickIssued = false;
             BanRequested = false;
             LastNotifiedLevel = RiskLevel.Normal;
+            LastNotifiedEvidenceCount = 0;
+            LastNotifyTime = float.NegativeInfinity;
             AiConfirmed = false;
             AiSummary = null;
             AiConfidence = 0;

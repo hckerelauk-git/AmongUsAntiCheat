@@ -19,7 +19,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>ApexCheatEnder</AssemblyName>
     <RootNamespace>ApexCheatEnder</RootNamespace>
-    <Version>1.1.4</Version>
+    <Version>1.1.5</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -195,12 +195,19 @@
                       LogicalName="ApexCheatEnder.MainMenuArt.jpg" />
     <EmbeddedResource Include="src\Resources\MainMenuArt01.jpg"
                       LogicalName="ApexCheatEnder.MainMenuArt01.jpg" />
-    <EmbeddedResource Include="src\Resources\MainMenuArt02.jpg"
-                      LogicalName="ApexCheatEnder.MainMenuArt02.jpg" />
     <EmbeddedResource Include="src\Resources\MainMenuArt03.jpg"
                       LogicalName="ApexCheatEnder.MainMenuArt03.jpg" />
+    <EmbeddedResource Include="src\Resources\MainMenuArt04.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt04.jpg" />
+    <EmbeddedResource Include="src\Resources\MainMenuArt05.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt05.jpg" />
+    <EmbeddedResource Include="src\Resources\MainMenuArt06.jpg"
+                      LogicalName="ApexCheatEnder.MainMenuArt06.jpg" />
     <EmbeddedResource Include="src\Resources\SuspiciousAlert.jpg"
                       LogicalName="ApexCheatEnder.ChatAbuseNotice.jpg" />
+    <!-- 反作弊图标（透明 PNG，128×128）。用在设置窗口标题栏与通知卡片上。 -->
+    <EmbeddedResource Include="src\Resources\Icon.png"
+                      LogicalName="ApexCheatEnder.Icon.png" />
   </ItemGroup>
 
   <!-- ================= 编译后自动部署 ================= -->

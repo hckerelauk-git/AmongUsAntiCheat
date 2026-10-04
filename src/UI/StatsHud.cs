@@ -38,7 +38,6 @@ namespace ApexCheatEnder.UI
         /// <summary>数值刷新间隔（秒）。帧率抖得厉害，太快反而看不清。</summary>
         private const float RefreshInterval = 0.25f;
 
-        private static bool _built;
         private static GameObject _root;
         private static Image _card;
         private static Text _fpsText;
@@ -49,17 +48,23 @@ namespace ApexCheatEnder.UI
 
         public static void EnsureBuilt(Transform canvasRoot)
         {
-            if (_built || canvasRoot == null) return;
-            _built = true;
+            if (canvasRoot == null) return;
+
+            // 用「对象是否还活着」当守卫，而不是一次性布尔标志。
+            // 画布万一被销毁重建，一次性标志会让状态条永远不再出现；
+            // Unity 的伪空判断能自动识别被销毁的对象，这里就能自愈。
+            if (_root != null) return;
 
             var font = UiBuilder.LoadFont(12);
             var width = PadX * 2f + FpsWidth + Gap + PingWidth + Gap + HostWidth;
 
             _root = UiBuilder.CreateNode("AceStatsHud", canvasRoot);
             var rect = _root.GetComponent<RectTransform>();
+            // 底部居中：左上角会压住任务列表，右上角会跟设置窗口打架，
+            // 底部中间是游戏 HUD 唯一长期空着的位置。
             UiBuilder.Place(rect,
-                new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(Margin, -Margin),
+                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, Margin),
                 new Vector2(width, Height));
 
             // 底板：与设置窗口、监控面板同一套圆角卡片
@@ -97,7 +102,7 @@ namespace ApexCheatEnder.UI
 
         public static void Tick()
         {
-            if (!_built || _root == null) return;
+            if (_root == null) return;
 
             if (!(AntiCheatRuntime.Config?.ShowStatsHud.Value ?? true))
             {
@@ -120,11 +125,14 @@ namespace ApexCheatEnder.UI
 
                 var ping = GameBridge.GetPing();
                 _pingText.text = ping < 0 ? "延迟 --" : "延迟 " + ping + " ms";
-                // 延迟高时用告警色，让「卡」这件事一眼可见
+                // 三档配色，与 Amethyst 的延迟显示一致：
+                //   < 80  绿 —— 流畅
+                //   < 160 黄 —— 偏高
+                //   否则  红 —— 明显卡
                 _pingText.color = ping < 0 ? AceTheme.TextDim
-                    : ping > 200 ? AceTheme.Danger
-                    : ping > 100 ? AceTheme.Warning
-                    : AceTheme.TextMain;
+                    : ping < 80 ? AceTheme.Success
+                    : ping < 160 ? AceTheme.Warning
+                    : AceTheme.Danger;
 
                 var isHost = GameBridge.IsHost;
                 _hostText.text = isHost ? "房主" : "客户端";

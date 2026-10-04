@@ -219,16 +219,32 @@ namespace ApexCheatEnder
         }
 
         /// <summary>
-        /// 检查每个玩家的判定等级是否**升级**，升级才弹右下角通知。
+        /// 重复提示的最小间隔（秒）。
         ///
-        /// 关键点：只在等级变化时提示一次。
-        /// 如果改成每帧提示，一个持续作弊的玩家会把屏幕刷满。
+        /// 同一个玩家在等级不变的情况下又犯了新规，等这么久再弹一次。
+        /// 太短会刷屏，太长又回到「只爆一次」的老毛病。
+        /// </summary>
+        private const float NotificationRepeatInterval = 6f;
+
+        /// <summary>
+        /// 检查每个玩家的判定等级，需要时弹右下角通知。
+        ///
+        /// 触发条件（满足其一）：
+        ///   · **等级升级** —— 首次发现某人作弊，或风险从可疑升到高风险
+        ///   · **又有新证据** 且距上次提示已超过 <see cref="NotificationRepeatInterval"/>
+        ///
+        /// 为什么不能只看「等级升级」：
+        /// 一个玩家一旦升到高风险，之后所有作弊都还是高风险，等级不再变化，
+        /// 通知就再也不会弹 —— 现场表现就是「只爆一次，后面的作弊就不管了」。
+        /// 加上第二条后，持续作弊的人会每隔几秒再提示一次，同时不会刷屏。
         /// </summary>
         private static void CheckRiskLevelChanges()
         {
             var cfg = Config;
             var verdicts = Verdicts;
             if (cfg == null || verdicts == null) return;
+
+            var now = Time.time;
 
             foreach (var v in verdicts.Verdicts.Values)
             {
@@ -238,13 +254,24 @@ namespace ApexCheatEnder
                 {
                     // 回到正常：重置标记，允许下次重新提示
                     v.LastNotifiedLevel = RiskLevel.Normal;
+                    v.LastNotifiedEvidenceCount = 0;
                     continue;
                 }
 
-                // 未升级 → 不重复弹
-                if (level <= v.LastNotifiedLevel) continue;
+                var escalated = level > v.LastNotifiedLevel;
+                var hasNewEvidence = v.Evidence.Count > v.LastNotifiedEvidenceCount;
+                var cooledDown = now - v.LastNotifyTime >= NotificationRepeatInterval;
+
+                // 升级必弹；等级没变则要「有新证据 + 冷却已过」才弹。
+                // 判定本身抽在 PlayerVerdict.ShouldNotify 里，方便脱离 Unity 回归测试。
+                if (!PlayerVerdict.ShouldNotify(level, v.LastNotifiedLevel,
+                        v.Evidence.Count, v.LastNotifiedEvidenceCount,
+                        now, v.LastNotifyTime, NotificationRepeatInterval))
+                    continue;
 
                 v.LastNotifiedLevel = level;
+                v.LastNotifiedEvidenceCount = v.Evidence.Count;
+                v.LastNotifyTime = now;
 
                 // 用户关掉了通知就只记日志，不弹卡片
                 if (!(cfg.ShowNotifications?.Value ?? true)) continue;
@@ -263,6 +290,10 @@ namespace ApexCheatEnder
 
         public static void Tick(float now, float deltaTime)
         {
+            // 分辨率自愈放在最前面，且不受 IsReady 限制：
+            // 窗口被压成 160×40 时，先让画面能用比什么都重要。
+            ResolutionGuard.Tick();
+
             if (!IsReady) return;
 
             _fpsElapsed += Time.unscaledDeltaTime;
@@ -343,6 +374,7 @@ namespace ApexCheatEnder
             if (!inGame && _wasInGameAtPresence)
             {
                 AmethystPresence.Reset();
+                ModFingerprint.Reset();
             }
             _wasInGameAtPresence = inGame;
 
@@ -383,7 +415,9 @@ namespace ApexCheatEnder
 
             _sampleTick++;
 
-            var maxSpeed = GameBridge.GetMaxAllowedSpeed() * Config.MaxSpeedTolerance.Value;
+            // 兜底值：拿本机玩家算。下面每个玩家会优先用「他自己」的理论速度。
+            var fallbackMaxSpeed = GameBridge.GetMaxAllowedSpeed() * Config.MaxSpeedTolerance.Value;
+            var tolerance = Config.MaxSpeedTolerance.Value;
             var grace = Config.RoundStartGracePeriod.Value;
 
             // 死亡玩家降频：死人不会再瞬移/超速，没必要每轮都做全套采样。
@@ -415,6 +449,7 @@ namespace ApexCheatEnder
                     Position = GameBridge.GetPosition(player),
                     IsDead = isDead,
                     InVent = GameBridge.IsInVent(player),
+                    InSpecialMovement = GameBridge.IsInSpecialMovement(player),
                     IsImpostor = GameBridge.IsImpostor(player),
                     CanVent = canVent,
                     RoleKnown = roleKnown,
@@ -423,6 +458,17 @@ namespace ApexCheatEnder
                 };
 
                 track.Push(snapshot);
+
+                // 鬼魂不参与移动类判定：死亡后穿墙、移动规则与活人完全不同，
+                // 拿活人的阈值去套必然误报。
+                if (isDead) continue;
+
+                // 速度上限必须按「这个玩家自己」算。
+                // 用本机玩家的 TrueSpeed 套所有人是错的 —— 鬼魂和活人的理论速度不同，
+                // 现场就是拿一个值去套全场，把 3 倍速大厅里的正常玩家判成了超速。
+                var maxSpeed = fallbackMaxSpeed;
+                var ownSpeed = GameBridge.GetMaxAllowedSpeed(player);
+                if (ownSpeed > 0.01f) maxSpeed = ownSpeed * tolerance;
 
                 EvidenceBuffer.Clear();
 

@@ -48,6 +48,9 @@ namespace ApexCheatEnder.Patches
         /// <summary>同一条拦截日志的最小间隔（秒），避免刷屏。</summary>
         private const float LogCooldown = 5f;
 
+        /// <summary>拿不到玩家号时用的限频键。玩家号正常都是 >=0，-1 不会冲突。</summary>
+        private const int UnknownPlayerKey = -1;
+
         private static readonly Dictionary<int, float> LastLogged = new Dictionary<int, float>();
 
         private static MethodBase TargetMethod() =>
@@ -131,11 +134,12 @@ namespace ApexCheatEnder.Patches
         {
             var now = Time.realtimeSinceStartup;
 
-            if (id >= 0)
-            {
-                if (LastLogged.TryGetValue(id, out var last) && now - last < LogCooldown) return;
-                LastLogged[id] = now;
-            }
+            // id<0 也必须进限频表：以前只在 id>=0 时记录，
+            // 拿不到玩家号的路径等于完全不限频，异常时会刷爆日志。
+            // 玩家号正常都是 >=0，用 -1 当「未知」的哨兵值不会冲突。
+            var key = id >= 0 ? id : UnknownPlayerKey;
+            if (LastLogged.TryGetValue(key, out var last) && now - last < LogCooldown) return;
+            LastLogged[key] = now;
 
             AntiCheatRuntime.Log?.LogWarning($"[拦截] 玩家「{name}」({id}) {detail}");
 

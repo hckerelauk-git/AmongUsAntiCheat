@@ -14,8 +14,16 @@ namespace ApexCheatEnder.Core
             if (integer) value = (float)Math.Round(value, MidpointRounding.AwayFromZero);
             return Clamp(value, min, max);
         }
-        public static float RowHeight(bool number) => number ? 88f : 60f;
-        public static float CardHeight(float bodyHeight, bool collapsed) => 38f + (collapsed ? 0f : bodyHeight + 6f);
+        /// <summary>
+        /// 设置行的高度。
+        ///
+        /// 统一 46：说明文字已经移到底部描述栏，行内只剩「名称 + 控件」，
+        /// 不再需要为说明预留第二行（原来是 100/68）。
+        /// </summary>
+        public static float RowHeight(bool number) => 46f;
+
+        /// <summary>分组标题（小号分隔文字）占的高度。</summary>
+        public const float SectionCaptionHeight = 30f;
         public static float MaxScroll(float contentHeight, float viewportHeight) => Math.Max(0f, contentHeight - viewportHeight);
         public static int Group(int page, int row)
         {

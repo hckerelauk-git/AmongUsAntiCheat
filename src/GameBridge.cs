@@ -206,6 +206,25 @@ namespace ApexCheatEnder
         }
 
         /// <summary>
+        /// 玩家是否处于会产生「合法大位移」的特殊移动状态。
+        ///
+        /// 三种都会让位移远超正常走路速度，全都必须豁免瞬移/超速判定：
+        ///   · <c>inVent</c>        —— 钻管道（空间跳跃）
+        ///   · <c>onLadder</c>      —— 爬梯子
+        ///   · <c>inMovingPlat</c>  —— 站移动平台（飞艇上的平台会带着玩家飞）
+        ///
+        /// 现场误报就是栽在只检查了 <c>inVent</c>：一轮里 6 个不同玩家被判瞬移，
+        /// 位移 4.79~16.44 单位 —— 多个玩家同时命中同一条规则，问题一定在规则上。
+        /// </summary>
+        public static bool IsInSpecialMovement(PlayerControl player)
+        {
+            if (player == null) return false;
+            try { if (player.inVent) return true; } catch { }
+            try { if (player.onLadder) return true; } catch { }
+            try { return player.inMovingPlat; } catch { return false; }
+        }
+
+        /// <summary>
         /// 判断玩家是否为内鬼阵营。
         ///
         /// 首选 RoleBehaviour.IsImpostor —— 这是游戏自己判定阵营用的权威属性，
@@ -525,8 +544,30 @@ namespace ApexCheatEnder
 
                 if (_wallLayerMask == 0) return false;
 
-                var hit = Physics2D.OverlapPoint(new Vector2(point.X, point.Y), _wallLayerMask);
-                return hit != null;
+                // 中心 + 四周各 0.3 单位的四个点，**全部**落在墙里才算「陷在墙中」。
+                //
+                // 两个理由，都是现场踩出来的：
+                //  1. `Ship` 层不只包含墙 —— 桌子、控制台、装饰这些船内物件都在这一层。
+                //     只测中心一个点，玩家贴着桌子或控制台边缘站立就会被判穿墙。
+                //     现场两个不同玩家在同一位置同时被报，正是这个特征。
+                //  2. 触发器碰撞体是控制台/通风管之类的交互区，不是墙，必须排除。
+                const float radius = 0.3f;
+                return InsideAt(point, 0f, 0f)
+                    && InsideAt(point, radius, 0f)
+                    && InsideAt(point, -radius, 0f)
+                    && InsideAt(point, 0f, radius)
+                    && InsideAt(point, 0f, -radius);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>某个偏移点是否落在非触发器的墙碰撞体内。</summary>
+        private static bool InsideAt(GameVec2 point, float dx, float dy)
+        {
+            try
+            {
+                var hit = Physics2D.OverlapPoint(new Vector2(point.X + dx, point.Y + dy), _wallLayerMask);
+                return hit != null && !hit.isTrigger;
             }
             catch { return false; }
         }

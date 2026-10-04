@@ -31,12 +31,22 @@ namespace ApexCheatEnder.Tests
             Run("UI：归一化中点", () => Eq(0.5f, SettingsLayout.Normalize(3f, 1f, 5f), "归一化"));
             Run("UI：外部值归一化钳制", () => Eq(1f, SettingsLayout.Normalize(100f, 1f, 5f), "钳制"));
             Run("UI：归一化零范围", () => Eq(0f, SettingsLayout.Normalize(5f, 5f, 5f), "零范围"));
-            Run("UI：折叠仅保留标题", () => Eq(38f, SettingsLayout.CardHeight(400f, true), "折叠高度"));
-            Run("UI：展开高度包含内边距", () => Eq(444f, SettingsLayout.CardHeight(400f, false), "展开高度"));
+            Run("UI：行高统一为紧凑高度", () => Eq(46f, SettingsLayout.RowHeight(false), "行高"));
+            Run("UI：分组标题占位为正", () => True(SettingsLayout.SectionCaptionHeight > 0f, "分组标题高度"));
             Run("UI：短页无滚动", () => Eq(0f, SettingsLayout.MaxScroll(100f, 300f), "短页"));
             Run("UI：长页末行可达", () => Eq(200f, SettingsLayout.MaxScroll(500f, 300f), "长页"));
             Run("UI：行为子页全部选项唯一覆盖", TestSettingsGroups);
-            Run("UI：数字行轨道不挤说明", () => True(SettingsLayout.RowHeight(true) > SettingsLayout.RowHeight(false) + 24f, "滑条独立区域"));
+            Run("UI：数字行滑条占独立右侧区域", () =>
+            {
+                var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                    AppContext.BaseDirectory, "../../../../src/UI/SettingsWindow.cs"));
+                var ui = System.IO.File.ReadAllText(path);
+                True(ui.Contains("SliderHit"), "数字行必须有独立滑条区域");
+                // 说明文字不再常驻行内，否则行高又会被撑回去
+                True(!ui.Contains("\"RowHint\""), "行内不得再常驻说明文字");
+                True(ui.Contains("UpdateHoverHint") && ui.Contains("_hintText"),
+                    "必须把说明搬到悬停描述栏");
+            });
             Run("背景：首次选择覆盖三张内置图", TestMenuArtInitialSelection);
             Run("背景：三图连续选择不重复", TestMenuArtNoRepeat);
             Run("背景：实际图片资源存在", TestMenuArtResourceFiles);
@@ -63,6 +73,170 @@ namespace ApexCheatEnder.Tests
             Run("任务：坐标不可信时不做绝对距离定罪", TestTaskPositionTrust);
             Run("扫描：不得把本插件判成作弊", TestScannerSelfExclusion);
             Run("互认：Amethyst 旁听边界", TestAmethystPresenceSource);
+            Run("会议：入会传送不得判为会议期间走动", TestMeetingEnterGrace);
+            Run("处置：手动踢人必须点击时重新校验目标", TestManualKickSafety);
+            Run("设置窗口：可拖拽缩放且尺寸持久化", TestResizableSettingsWindow);
+            Run("通知：不得只爆一次，也不得刷屏", TestNotificationFrequency);
+            Run("破坏：必须确认是 UpdateSystem 才能归因", TestSabotageAttribution);
+            Run("分辨率：异常判定与修复目标校验", TestResolutionPolicy);
+            Run("图标：资源存在且已接入标题栏与通知", TestAppIconResource);
+            Run("模组指纹：按自定义 RPC 识别，库里没有就显示 GUID 原文", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var db = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/ModFingerprintDb.cs"));
+                // 原版 RpcCalls 最大 67（SpiritGuideMessage），超出即模组自定义
+                True(db.Contains("VanillaRpcMax = 67"), "必须以原版 RpcCalls 上限为界");
+                True(db.Contains("DisplayOf"), "必须支持 GUID→名字 查询");
+                // 用户要求：库里没有就直接显示 GUID 原文，不能显示空白
+                True(db.Contains("ByGuid.TryGetValue(guid, out var name) ? name : guid"),
+                    "查不到 GUID 时必须回退显示 GUID 原文");
+                // NitroAntiCheat 实测指纹
+                True(db.Contains("com.anonymus.aum"), "必须收录 AUM");
+                True(db.Contains("sicko.menu") && db.Contains("killnetwork"), "必须收录 SickoMenu / KillNetwork");
+
+                var fp = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/ModFingerprint.cs"));
+                True(fp.Contains("IsCustomCallId(callId)"), "原版范围内的 callId 必须立即放行（热路径）");
+                True(fp.Contains("Announce"), "必须支持模组自报家门");
+                True(fp.Contains("未知模组 #"), "认不出的自定义 ID 要按原始编号记下来");
+
+                // 观测点必须挂在 HandleRpc 上，否则看不到别人的 RPC
+                var patch = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Patches/GameplayPatches.cs"));
+                True(patch.Contains("ModFingerprint.Observe"), "必须在 HandleRpc 的 Prefix 上观测");
+            });
+
+            Run("标记：所有玩家头上都要有身份标识", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var presence = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/AcePresence.cs"));
+                // 非模组玩家也要打标
+                True(presence.Contains("MarkVanillaPlayers"), "必须有「标记非模组玩家」开关");
+                True(presence.Contains("PresenceTags.VanillaDefault"), "非模组玩家要有默认标记");
+                // Amethyst 用户的 UID：协议只传 PlayerId + 版本，版本是唯一身份信息
+                True(presence.Contains("AmethystPresence.GetVersion"), "Amethyst 用户必须带上版本号");
+                True(presence.Contains("ModFingerprint.Of"), "标记必须由模组指纹驱动");
+                // 自己不打标
+                True(presence.Contains("local != null && GameBridge.GetPlayerId(local) == id"), "自己头上不打标");
+
+                var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Config/AntiCheatConfig.cs"));
+                True(cfg.Contains("标记非模组玩家") && cfg.Contains("非模组玩家标记写成什么"),
+                    "两个配置项都要有");
+
+                var tags = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/PresenceTags.cs"));
+                True(tags.Contains("原本玩家"), "默认文案应为「原本玩家」");
+            });
+
+            Run("瞬移阈值：必须高于网络延迟校正的幅度", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Config/AntiCheatConfig.cs"));
+                // 实测 4.79 单位的位移是延迟校正，不是作弊
+                True(cfg.Contains("\"一下挪多远算瞬移\", 8.0f"), "瞬移阈值默认必须抬到 8.0");
+                True(cfg.Contains("AcceptableValueRange<float>(1f, 60f)"), "上限要够容纳真实瞬移");
+                True(cfg.Contains("Math.Abs(TeleportMinDistance.Value - 4.5f)"), "必须有旧值迁移");
+            });
+
+            Run("骂人提示：引用/否定语境不提示，且不提示自己", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var policy = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/ChatAbuseNoticePolicy.cs"));
+                True(policy.Contains("BenignPrefixes") && policy.Contains("HasBenignPrefix"),
+                    "必须豁免引用/否定语境（中文无词边界，纯子串必然误报）");
+
+                var notice = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/UI/ChatAbuseNotice.cs"));
+                True(notice.Contains("fromSelf"), "自己发的消息不得提示");
+            });
+
+            Run("瞬移：必须豁免梯子与移动平台，不能只判管道", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var bridge = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/GameBridge.cs"));
+                // 爬梯子、站飞艇移动平台都会产生合法大位移
+                True(bridge.Contains("player.onLadder"), "必须豁免爬梯子");
+                True(bridge.Contains("player.inMovingPlat"), "必须豁免移动平台");
+                True(bridge.Contains("IsInSpecialMovement"), "必须提供统一判定");
+
+                var analyzer = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/BehaviorAnalyzer.cs"));
+                True(analyzer.Contains("cur.InVent || cur.InSpecialMovement"),
+                    "瞬移/超速判定必须同时豁免这两种状态");
+            });
+
+            Run("标记：Amethyst 用户必须粉心 + 粉色名字，且旧配置能迁移", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var tags = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/PresenceTags.cs"));
+                True(tags.Contains("💗AME用户💗"), "默认标记必须是粉心 💗");
+                True(tags.Contains("LegacyAmethystTag"), "必须记录旧默认值以便迁移");
+
+                var presence = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/AcePresence.cs"));
+                True(presence.Contains("<color=#") && presence.Contains("AmethystNameHex"),
+                    "Amethyst 用户名字必须上粉色");
+                // 名字颜色由游戏每帧写，改 Graphic 颜色会被覆盖闪烁，必须用富文本
+                True(!presence.Contains("nameText.color ="), "不得直接改 TextMeshPro 颜色，会被游戏覆盖");
+
+                var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Config/AntiCheatConfig.cs"));
+                True(cfg.Contains("LegacyAmethystTag"), "必须做一次性迁移，否则老配置还是紫心");
+            });
+
+            Run("击杀：角色未知时不得判「非内鬼击杀」", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var analyzer = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/BehaviorAnalyzer.cs"));
+                // 角色未同步时 IsImpostor 恒为 false，不设守卫会误报开局阶段的正常击杀
+                True(analyzer.Contains("killer.Current.RoleKnown && !killer.Current.IsImpostor"),
+                    "击杀判定必须先确认角色已知");
+            });
+
+            Run("穿墙：必须五点采样 + 排除触发器 + 连续确认", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var bridge = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/GameBridge.cs"));
+                // Ship 层不只含墙，还含桌子/控制台；只测中心会误伤贴边站立的玩家
+                True(bridge.Contains("InsideAt(point, radius, 0f)") && bridge.Contains("InsideAt(point, -radius, 0f)")
+                     && bridge.Contains("InsideAt(point, 0f, radius)") && bridge.Contains("InsideAt(point, 0f, -radius)"),
+                    "必须中心加四周五点全部命中才算陷在墙里");
+                True(bridge.Contains("!hit.isTrigger"), "必须排除触发器碰撞体（控制台/通风管不是墙）");
+
+                var analyzer = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/BehaviorAnalyzer.cs"));
+                True(analyzer.Contains("ConsecutiveWallStrikes >= 2"), "穿墙必须连续采样确认，单次擦边不算");
+            });
+
+            Run("UI：通知停留时长足够读完，且槽位够用", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Config/AntiCheatConfig.cs"));
+                // 原来 5 秒，现场反馈"还没读完就没了"
+                True(cfg.Contains("\"提醒停留几秒\", 12f"), "通知默认停留时长必须放宽到 12 秒");
+                True(cfg.Contains("AcceptableValueRange<float>(2f, 60f)"), "上限必须提到 60 秒");
+
+                var panel = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/UI/NotificationPanel.cs"));
+                True(panel.Contains("SlotCount = 5"), "同时显示的通知槽位必须够多，否则长时长反而互相挤掉");
+            });
+
+            Run("UI：记录页必须给出「谁·几次·犯了什么」", () =>
+            {
+                var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                    AppContext.BaseDirectory, "../../../../src/UI/SettingsWindow.cs"));
+                var ui = System.IO.File.ReadAllText(path);
+                var at = ui.IndexOf("BuildToolsPage", StringComparison.Ordinal);
+                True(at > 0, "应能找到记录与工具页");
+                var block = ui.Substring(at, ui.IndexOf("private static string RuleHintOf", at) - at);
+                True(block.Contains("检测汇总"), "必须有检测汇总");
+                True(block.Contains("v.Evidence.Count") && block.Contains("共 ") && block.Contains(" 次"),
+                    "必须显示命中次数");
+                True(block.Contains("counts[") && block.Contains("EvaluateLevel"),
+                    "必须按规则聚合计数并显示风险等级");
+                True(block.Contains("RuleHintOf"), "必须为每条规则给出中文说明（犯了什么）");
+            });
+
+            Run("UI：重建时必须清空内容区，否则旧行与新行重叠", () =>
+            {
+                var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                    AppContext.BaseDirectory, "../../../../src/UI/SettingsWindow.cs"));
+                var ui = System.IO.File.ReadAllText(path);
+                // 行现在直接挂在 _contentArea 下，不清空就会重影（现场出过）
+                True(ui.Contains("_contentArea.childCount") && ui.Contains("UnityEngine.Object.Destroy(child.gameObject)"),
+                    "重建前必须销毁内容区的全部子物体");
+            });
             Run("GameVec2：距离与向量运算", TestGameVec2);
             Run("PlayerTrack：快照位移/时间差计算", TestPlayerTrackDelta);
             Run("PlayerTrack：合法传送豁免窗口", TestLegalTeleportWindow);
@@ -148,18 +322,26 @@ namespace ApexCheatEnder.Tests
             Eq(2, SettingsLayout.Group(2, 100), "动态处置玩家属于命中卡片");
         }
 
+        /// <summary>随机池里的全部下标。张数变了不用改测试，跟着 BackgroundCount 走。</summary>
+        private static int[] AllBackgroundIndexes()
+        {
+            var all = new int[MenuArtSource.BackgroundCount];
+            for (var i = 0; i < all.Length; i++) all[i] = i;
+            return all;
+        }
+
         private static void TestMenuArtInitialSelection()
         {
-            Eq(3, MenuArtSource.BackgroundCount, "随机候选应为三张图片");
+            Eq(5, MenuArtSource.BackgroundCount, "随机池应为五张图片");
             var seen = new HashSet<int>();
             var random = new Random(20261003);
             for (var i = 0; i < 100; i++)
             {
                 var selected = MenuArtSource.SelectBackground(-1, random);
-                True(selected >= 0 && selected < MenuArtSource.BackgroundCount, "选择必须属于三图候选范围");
+                True(selected >= 0 && selected < MenuArtSource.BackgroundCount, "选择必须落在候选范围内");
                 seen.Add(selected);
             }
-            True(seen.SetEquals(new[] { 0, 1, 2 }), "首次选择应覆盖全部三张图片");
+            True(seen.SetEquals(AllBackgroundIndexes()), "首次选择应覆盖全部候选图片");
         }
 
         private static void TestMenuArtNoRepeat()
@@ -172,19 +354,19 @@ namespace ApexCheatEnder.Tests
                 for (var i = 0; i < 1000; i++)
                 {
                     var next = MenuArtSource.SelectBackground(previous, random);
-                    True(next >= 0 && next < MenuArtSource.BackgroundCount, "选择必须属于三图候选范围");
+                    True(next >= 0 && next < MenuArtSource.BackgroundCount, "选择必须落在候选范围内");
                     True(next != previous, "连续两次不能选择同一张图片");
                     seen.Add(next);
                     previous = next;
                 }
-                True(seen.SetEquals(new[] { 0, 1, 2 }), "连续选择应覆盖全部三张图片，而非固定两图交替");
+                True(seen.SetEquals(AllBackgroundIndexes()), "连续选择应覆盖全部候选图片，而非固定交替");
             }
         }
 
         private static void TestMenuArtResourceFiles()
         {
             var directory = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/Resources"));
-            foreach (var resource in new[] { MenuArtSource.FirstResource, MenuArtSource.SecondResource, MenuArtSource.ThirdResource, MenuArtSource.FallbackResource })
+            foreach (var resource in MenuArtSource.PoolResources.Concat(new[] { MenuArtSource.FallbackResource }))
             {
                 var path = System.IO.Path.Combine(directory, resource.Substring("ApexCheatEnder.".Length));
                 True(System.IO.File.Exists(path), "图片资源应实际存在：" + path);
@@ -209,7 +391,11 @@ namespace ApexCheatEnder.Tests
             True(ChatAbuseNoticePolicy.Matches("【傻逼】！", "傻逼"), "短词被常见聊天标点包围时应命中");
             True(ChatAbuseNoticePolicy.Matches("xx[TARGET]yy", "target"), "标点应保留词边界");
             True(!ChatAbuseNoticePolicy.Matches("targeting", "target"), "关键词嵌入英文单词不应误报");
-            True(!ChatAbuseNoticePolicy.Matches("前缀傻逼后缀", "傻逼"), "短中文词嵌入其他文本应保守拒绝");
+            // 中文没有词分隔符，嵌入句中的中文骂词必须能命中。
+            // 旧规则对长度 ≤2 的中文词也要求边界，「前缀傻逼后缀」会被整体拒绝 ——
+            // 那是最常见的骂法，拒绝掉等于词表作废。
+            True(ChatAbuseNoticePolicy.Matches("前缀傻逼后缀", "傻逼"), "中文骂词嵌入句中必须命中");
+            True(ChatAbuseNoticePolicy.Matches("你个智障玩意儿", "智障"), "中文骂词嵌入句中必须命中（2 字）");
             True(!ChatAbuseNoticePolicy.Matches("tar-get", "target"), "不可删除标点拼接新关键词");
             True(ChatAbuseNoticePolicy.Matches("ＴＡＲＧＥＴ！", "target"), "全角与大小写应规范化");
             True(ChatAbuseNoticePolicy.Matches("hello，world", "hello world"), "标点与空白统一为分隔符");
@@ -270,8 +456,8 @@ namespace ApexCheatEnder.Tests
             using var pe = new System.Reflection.PortableExecutable.PEReader(input);
             var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
             var names = new HashSet<string>();
-            var expected = new HashSet<string>
-                { MenuArtSource.FirstResource, MenuArtSource.SecondResource, MenuArtSource.ThirdResource, MenuArtSource.FallbackResource };
+            var expected = new HashSet<string>(MenuArtSource.PoolResources)
+                { MenuArtSource.FallbackResource };
             foreach (var handle in metadata.ManifestResources)
             {
                 var resource = metadata.GetManifestResource(handle);
@@ -430,6 +616,242 @@ namespace ApexCheatEnder.Tests
             True(core.Contains("claimedId != sender.PlayerId"), "必须校验包内 id 与发送者一致");
         }
 
+        /// <summary>
+        /// 会议开始时的传送不得被判成「会议期间走动」。
+        ///
+        /// 好友现场日志：会议一开始，10 个玩家全部命中 MoveDuringMeeting
+        /// （位移 3.15 ~ 21.43 单位）。那是游戏把所有人传送到会议桌，不是作弊。
+        ///
+        /// 两道闸必须都生效，同时「豁免过期后真的有人动」还得能抓到 ——
+        /// 否则就是把检测整个废掉了。
+        /// </summary>
+        private static void TestMeetingEnterGrace()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                "ace-meeting-" + Guid.NewGuid().ToString("N") + ".cfg");
+            var cfg = new ApexCheatEnder.Config.AntiCheatConfig(new BepInEx.Configuration.ConfigFile(path, false));
+            var analyzer = new BehaviorAnalyzer(cfg, null);
+
+            // 闸一：上一帧不在会议里 → 这一帧就是入会那一跳
+            var enter = new PlayerTrack(1, "P1", 0f);
+            enter.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), InMeeting = false });
+            enter.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(20f, 0f), InMeeting = true });
+            var o1 = new List<Violation>();
+            analyzer.AnalyzeMeetingMovement(enter, 0.1f, o1);
+            True(!o1.Exists(v => v.Kind == ViolationKind.MoveDuringMeeting),
+                "入会传送不得判为会议期间走动");
+
+            // 闸二：仍在合法传送豁免窗口内
+            var grace = new PlayerTrack(2, "P2", 0f);
+            grace.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), InMeeting = true });
+            grace.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(20f, 0f), InMeeting = true });
+            grace.LastLegalTeleportTime = 0.05f;
+            var o2 = new List<Violation>();
+            analyzer.AnalyzeMeetingMovement(grace, 0.5f, o2);
+            True(!o2.Exists(v => v.Kind == ViolationKind.MoveDuringMeeting),
+                "会议开始豁免窗口内不得判定");
+
+            // 豁免过期后，会议期间**持续**移动必须仍然能抓到
+            var later = new PlayerTrack(3, "P3", 0f);
+            later.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), InMeeting = true });
+            later.Push(new PlayerSnapshot { Time = 5f, Position = new GameVec2(20f, 0f), InMeeting = true });
+            later.LastLegalTeleportTime = 0f;
+            var o3 = new List<Violation>();
+            // 第一次只记一次「疑似」，不报 —— 单次尖峰区分不了传送和移动
+            analyzer.AnalyzeMeetingMovement(later, 5f, o3);
+            True(!o3.Exists(v => v.Kind == ViolationKind.MoveDuringMeeting),
+                "单次会议位移不得立即判定，必须连续才算");
+
+            // 第二次仍在动 → 这才报
+            later.Push(new PlayerSnapshot { Time = 5.1f, Position = new GameVec2(40f, 0f), InMeeting = true });
+            analyzer.AnalyzeMeetingMovement(later, 5.1f, o3);
+            True(o3.Exists(v => v.Kind == ViolationKind.MoveDuringMeeting),
+                "连续移动必须判定");
+
+            // 传送是「一跳就停」：动一次之后停住，永远攒不满连续次数
+            var teleport = new PlayerTrack(4, "P4", 0f);
+            teleport.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), InMeeting = true });
+            teleport.Push(new PlayerSnapshot { Time = 5f, Position = new GameVec2(20f, 0f), InMeeting = true });
+            teleport.LastLegalTeleportTime = 0f;
+            var o4 = new List<Violation>();
+            analyzer.AnalyzeMeetingMovement(teleport, 5f, o4);
+            teleport.Push(new PlayerSnapshot { Time = 5.1f, Position = new GameVec2(20f, 0f), InMeeting = true });
+            analyzer.AnalyzeMeetingMovement(teleport, 5.1f, o4);
+            True(!o4.Exists(v => v.Kind == ViolationKind.MoveDuringMeeting),
+                "一次性传送后停住，不得判定为会议期间走动");
+        }
+
+        /// <summary>
+        /// 手动踢人不得在构建列表时把 clientId 捕获进闭包。
+        ///
+        /// 踢人是不可逆操作。列表打开后玩家进出会重新分配 id / clientId，
+        /// 用构建时的旧值会踢到别人头上。必须在点击时重新解析并校验身份。
+        /// </summary>
+        private static void TestManualKickSafety()
+        {
+            var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
+            var text = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "UI/SettingsWindow.cs"));
+
+            var kickAt = text.IndexOf("\"踢出 \" + name", StringComparison.Ordinal);
+            True(kickAt > 0, "应能找到手动踢人入口");
+
+            // 取该入口后面的一段（到下一个 return list 为止）作为被检查区间
+            var end = text.IndexOf("return list;", kickAt, StringComparison.Ordinal);
+            True(end > kickAt, "应能界定踢人代码区间");
+            var block = text.Substring(kickAt, end - kickAt);
+
+            True(block.Contains("GameBridge.GetPlayers()"),
+                "踢人时必须重新枚举玩家，确认目标仍然存在");
+            True(block.Contains("GetPlayerId(current) != pid"),
+                "必须校验玩家号仍然对得上");
+            True(block.Contains("GetPlayerName(current) != name"),
+                "必须校验昵称仍然对得上，防止 id 被复用后踢错人");
+            True(block.Contains("GameBridge.GetClientIdByPlayerId(pid)"),
+                "clientId 必须在点击时解析，不能提前捕获");
+        }
+
+        /// <summary>
+        /// 设置窗口必须可调整大小，且尺寸要能持久化。
+        ///
+        /// 关键约束：拖拽重建布局必须节流 —— 重建会销毁并重建整窗对象，
+        /// 每帧一次等于每秒造几千个对象。
+        /// </summary>
+        private static void TestResizableSettingsWindow()
+        {
+            var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
+            var ui = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "UI/SettingsWindow.cs"));
+            var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "Config/AntiCheatConfig.cs"));
+
+            True(ui.Contains("HandleResize"), "必须有右下角拖拽缩放处理");
+            True(ui.Contains("ResizeGrip"), "必须有可见的缩放手柄");
+            True(ui.Contains("_nextLiveRelayout"), "拖拽重建布局必须节流");
+            True(ui.Contains("Mathf.Clamp(_resizeStartWidth") && ui.Contains("Mathf.Clamp(_resizeStartHeight"),
+                "缩放必须限幅，否则能把窗口拖成 0 像素");
+            True(ui.Contains("delta.x / scale"), "鼠标位移必须换算回未缩放前的窗口单位，否则手感会飘");
+
+            // 尺寸必须写回配置，否则每次启动都回到默认值
+            True(cfg.Contains("SettingsWindowWidth") && cfg.Contains("SettingsWindowHeight"),
+                "窗口尺寸必须持久化到配置");
+            True(ui.Contains("PersistWindowSize"), "松手后必须保存尺寸");
+
+            // 重建时必须清掉旧引用，否则会残留指向已销毁对象的引用
+            True(ui.Contains("_resizeGrip = null;") && ui.Contains("_built = false;"),
+                "重建时必须重置引用与构建标志");
+        }
+
+        /// <summary>
+        /// 通知频率：不能「只爆一次」，也不能刷屏。
+        ///
+        /// 线上问题：早期实现是「等级没升就不弹」，玩家一旦升到高风险，
+        /// 之后所有作弊都还是高风险、等级不再变化 → 通知再也不弹，
+        /// 表现就是「通知只爆一次，后面的作弊就不管了」。
+        /// </summary>
+        private static void TestNotificationFrequency()
+        {
+            const float Interval = 6f;
+
+            // 正常状态不弹
+            True(!PlayerVerdict.ShouldNotify(RiskLevel.Normal, RiskLevel.Normal, 3, 0, 100f, 0f, Interval),
+                "正常等级不得弹通知");
+
+            // 升级必弹（首次发现）
+            True(PlayerVerdict.ShouldNotify(RiskLevel.HighRisk, RiskLevel.Normal, 1, 0, 10f, -1f, Interval),
+                "等级升级必须弹");
+
+            // 等级不变、无新证据 → 不弹（否则会刷屏）
+            True(!PlayerVerdict.ShouldNotify(RiskLevel.HighRisk, RiskLevel.HighRisk, 5, 5, 100f, 0f, Interval),
+                "等级不变且无新证据不得重复弹");
+
+            // 等级不变、有新证据、冷却已过 → 必须弹（这是修掉「只爆一次」的关键）
+            True(PlayerVerdict.ShouldNotify(RiskLevel.HighRisk, RiskLevel.HighRisk, 6, 5, 100f, 0f, Interval),
+                "有新证据且冷却已过必须再弹，否则后续作弊全被静默");
+
+            // 等级不变、有新证据、但还在冷却内 → 不弹（防刷屏）
+            True(!PlayerVerdict.ShouldNotify(RiskLevel.HighRisk, RiskLevel.HighRisk, 6, 5, 3f, 0f, Interval),
+                "冷却期内不得重复弹");
+        }
+
+        /// <summary>
+        /// 破坏系统检测必须先确认「栈顶那条 RPC 就是 UpdateSystem」才归因。
+        ///
+        /// 现场问题：一次击杀同时报了 KillWhileNotImpostor 和 SabotageWhileNotImpostor，
+        /// 用户看到的是「明明是杀人却报了破坏」。
+        /// 根因是 RpcContext 记的是「当前正在处理的 RPC」而不是「谁调用了 UpdateSystem」——
+        /// 处理击杀 RPC 途中游戏内部调用 UpdateSystem，就会被算到杀人者头上。
+        /// </summary>
+        private static void TestSabotageAttribution()
+        {
+            var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
+            var text = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "Patches/GameplayPatches.cs"));
+
+            var start = text.IndexOf("class UpdateSystemPatch", StringComparison.Ordinal);
+            True(start > 0, "应能找到破坏系统检测补丁");
+            var end = text.IndexOf("SystemTypeCount", start, StringComparison.Ordinal);
+            True(end > start, "应能界定补丁区间");
+            var block = text.Substring(start, end - start);
+
+            True(block.Contains("RpcContext.CallId != (int)RpcCalls.UpdateSystem"),
+                "破坏归因前必须校验栈顶 RPC 就是 UpdateSystem");
+
+            // 校验必须发生在取发送者之前，否则已经先归因了
+            var checkAt = block.IndexOf("RpcContext.CallId", StringComparison.Ordinal);
+            var senderAt = block.IndexOf("RpcContext.SenderTrack()", StringComparison.Ordinal);
+            True(checkAt >= 0 && senderAt > checkAt, "校验必须早于取发送者");
+        }
+
+        /// <summary>
+        /// 分辨率自愈的判定。
+        ///
+        /// 现场坏值：144×1（客户区 1 像素高，窗口 160×40）。它是**自锁死循环** ——
+        /// Unity 把当前窗口尺寸当分辨率存下来，下次启动照此还原，于是永远好不了。
+        /// 这里锁死「什么算不对劲」和「修复目标本身必须合理」。
+        /// </summary>
+        private static void TestResolutionPolicy()
+        {
+            True(ResolutionPolicy.NeedsRepair(144, 1), "实测的 144x1 必须判定为异常");
+            True(ResolutionPolicy.NeedsRepair(160, 40), "160x40 必须判定为异常");
+            True(ResolutionPolicy.NeedsRepair(1920, 100), "高度过小必须判定为异常");
+            True(ResolutionPolicy.NeedsRepair(320, 1080), "宽度过小必须判定为异常");
+            True(!ResolutionPolicy.NeedsRepair(1280, 600), "1280x600 必须判定为正常");
+            True(!ResolutionPolicy.NeedsRepair(800, 480), "阈值边界必须判定为正常");
+            True(!ResolutionPolicy.NeedsRepair(1920, 1080), "常规分辨率必须判定为正常");
+
+            // 修复目标本身不合理时宁可不改，否则会越修越小
+            True(ResolutionPolicy.IsValidTarget(1280, 600), "1280x600 是合法目标");
+            True(!ResolutionPolicy.IsValidTarget(144, 1), "不得把目标设成坏值");
+            True(!ResolutionPolicy.IsValidTarget(1280, 100), "目标高度过小应拒绝");
+        }
+
+        /// <summary>
+        /// 反作弊图标：文件必须在、必须是嵌进 DLL 的、必须带透明通道。
+        ///
+        /// 这是整个插件里唯一一张外部画好的位图，容易在打包时漏掉 ——
+        /// 漏了的话界面只是少个装饰，不会报错，所以必须有断言盯着。
+        /// </summary>
+        private static void TestAppIconResource()
+        {
+            var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+            var icon = System.IO.Path.Combine(root, "src/Resources/Icon.png");
+            True(System.IO.File.Exists(icon), "图标文件必须存在");
+
+            var csproj = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "ApexCheatEnder.csproj"));
+            True(csproj.Contains("src\\Resources\\Icon.png"), "图标必须被 csproj 包含");
+            True(csproj.Contains("ApexCheatEnder.Icon.png"), "图标必须有显式 LogicalName");
+
+            var theme = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/UI/AceTheme.cs"));
+            True(theme.Contains("ApexCheatEnder.Icon.png"), "加载路径必须与 LogicalName 一致");
+            True(theme.Contains("if (_iconTried) return _icon"), "图标加载必须只尝试一次，失败不重试");
+
+            // 两个使用点：标题栏与通知卡片
+            var settings = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/UI/SettingsWindow.cs"));
+            True(settings.Contains("AceTheme.Icon()"), "设置窗口标题栏必须使用图标");
+            True(settings.Contains("titleLeft"), "有图标时标题必须右移，且图标缺失时不跑偏");
+
+            var notify = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/UI/NotificationPanel.cs"));
+            True(notify.Contains("AceTheme.Icon()"), "通知卡片必须使用图标");
+            True(notify.Contains("textLeft"), "有图标时通知文字必须右移");
+        }
+
         private static void TestAutomaticMenuArt()
         {
             var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
@@ -448,16 +870,55 @@ namespace ApexCheatEnder.Tests
 
             foreach (var forbidden in new[]
                      {
-                         "GetRootGameObjects", "GetComponentsInChildren", "GetComponent<SpriteRenderer>",
+                         "GetRootGameObjects", "GetComponentsInChildren",
                          "FindBackgroundRenderer",
                      })
                 True(!artCode.Contains(forbidden), "不得再遍历场景查找原背景：" + forbidden);
 
-            // 新方案：自建独立后景，不替换任何游戏原有对象。
-            True(art.Contains("new GameObject(") && art.Contains("AddComponent<SpriteRenderer>()"),
-                "应自建独立 SpriteRenderer 后景");
-            True(art.Contains("sortingOrder = BackdropSortingOrder"), "后景必须固定到最低排序，不能盖住菜单精灵");
-            True(art.Contains("camera.cullingMask"), "后景层必须落在相机确实渲染的层上");
+            // ══ 本文件是 Amethyst 的 AmethystMainMenuArt 的逐字移植 ══
+            // 下面每条断言都对应一个「我自己改进过、结果出错」的地方，
+            // 钉死它们，防止以后再自作聪明。
+            True(art.Contains("new Vector3(0f, 0f, 600f)"), "位置必须写死 (0,0,600)，与 Amethyst 一致");
+            True(art.Contains("PixelsPerUnit = 150f"), "像素密度必须与 Amethyst 一致（150）");
+            True(art.Contains("(HideFlags)0x3D"), "贴图与精灵必须设 hideFlags |= 0x3D（含 DontUnloadUnusedAsset）");
+            True(art.Contains("camera.orthographicSize * 2f"), "正交相机必须按 orthographicSize*2 算可视高度");
+            True(art.Contains("viewHeight * camera.aspect"), "可视宽度必须由高度乘宽高比得到");
+            True(art.Contains("GameObject.Find(AmbienceName)") && art.Contains("\"Ambience\""),
+                "必须关掉原版氛围对象 Ambience");
+            True(art.Contains("_ambience.SetActive(true)"), "离开菜单必须把 Ambience 恢复");
+
+            // ══ 最关键的一步：关掉原版背景贴图 ══
+            // Amethyst 的 AmethystMainMenuOptimize.Tick 里有 HideObject("BackgroundTexture")。
+            // 我先前只关 Ambience，完全不知道 BackgroundTexture 才是游戏真正的背景贴图，
+            // 它一直盖着自定义图 —— 所以图只在半透明面板里透出来。
+            True(art.Contains("\"BackgroundTexture\""), "必须隐藏 BackgroundTexture，否则它永远盖着自定义图");
+            True(art.Contains("HideVanillaLayers"), "必须有隐藏原版图层的步骤");
+            True(art.Contains("RestoreVanillaLayers"), "离开菜单必须恢复原版图层");
+            // 只隐藏 BackgroundTexture 一个就够了。
+            // Amethyst 还会隐藏 WindowShine / MainUI/Tint / MaskedBlackScreen、
+            // 关掉 LeftPanel / RightPanel 底板 —— 那是配合它自己重绘的界面。
+            // 实测隐藏这些会导致主菜单「开始」按钮点不动（和菜单交互流程绑在一起）。
+            // 用 artCode（已去注释）判断，否则注释里举的例子会被当成代码
+            True(!artCode.Contains("\"MaskedBlackScreen\""), "不得隐藏 MaskedBlackScreen —— 会让开始按钮点不动");
+            True(artCode.Contains("\"RightPanel\""), "必须关闭 RightPanel 底板 —— 它的外框会盖在背景上");
+            True(!artCode.Contains("\"LeftPanel\""),
+                "不得关闭 LeftPanel 底板 —— 左侧按钮区，和菜单交互关联更可疑");
+            True(!artCode.Contains("\"WindowShine\""), "不得隐藏 WindowShine —— 非必需，少动少错");
+            True(artCode.Contains("\"BackgroundTexture\""), "但必须隐藏 BackgroundTexture —— 否则背景永远露不出来");
+
+            // 三条「自作聪明」的弯路，永久禁止
+            True(!artCode.Contains("sortingOrder"), "不得设 sortingOrder —— 抬高会盖住游戏 UI（实测）");
+            True(!artCode.Contains("TryComputeCoverSize") && !artCode.Contains("CoverSafetyFactor"),
+                "不得自创「取所有相机最大值 × 安全系数」的尺寸算法，Amethyst 只用 Camera.main");
+            True(!artCode.Contains("ScreenSpaceOverlay"), "不得用 Overlay 画布 —— 它会盖住游戏 UI");
+            True(!artCode.Contains("Camera.allCameras"), "不得遍历相机挑一个，Amethyst 只用 Camera.main");
+
+            // 反复重试刷 133 条同样的错误，本身就是缺陷；必须有熔断。
+            // 反复重试刷 133 条同样的错误，本身就是缺陷；必须有熔断。
+            True(art.Contains("MaxFailures") && art.Contains("_gaveUp"), "背景失败必须有熔断，不能无限重试");
+            True(art.Contains("ex.StackTrace"), "背景失败必须记录调用栈，只有 Message 定位不到原因");
+
+            // 排序只出现在画布上（取负值排到游戏 UI 之后）这类写法已经废弃，见上面三条弯路。
 
             // 反复重试刷 133 条同样的错误，本身就是缺陷；必须有熔断。
             True(art.Contains("MaxFailures") && art.Contains("_gaveUp"), "背景失败必须有熔断，不能无限重试");

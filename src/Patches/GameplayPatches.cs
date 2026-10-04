@@ -71,7 +71,14 @@ namespace ApexCheatEnder.Patches
         {
             try
             {
-                RpcContext.Push(__instance, ExtractCallId(__args));
+                var callId = ExtractCallId(__args);
+
+                // 模组指纹：超出原版 RpcCalls 范围（>67）的 callId 一定是模组发的。
+                // 挂在这里是因为 HandleRpc 的 Prefix 能看到**每一个** RPC 及其发送者。
+                // Observe 对原版范围内的 callId 立即返回，热路径开销可忽略。
+                ModFingerprint.Observe(__instance, callId);
+
+                RpcContext.Push(__instance, callId);
             }
             catch
             {
@@ -120,6 +127,20 @@ namespace ApexCheatEnder.Patches
             PatchHelper.Safe(() =>
             {
                 if (!AntiCheatRuntime.IsReady) return;
+
+                // ── 归因必须先确认「栈顶那条 RPC 就是 UpdateSystem」 ──
+                //
+                // RpcContext 记的是「当前正在处理的 RPC」，不是「当前这个方法是被谁调的」。
+                // 而 ShipStatus.UpdateSystem 既可能由 UpdateSystem 这条 RPC 触发，
+                // 也可能在处理**别的** RPC（比如击杀）途中被游戏内部调用。
+                //
+                // 不做这个判断的话，后者会被算成「这个杀人的人搞破坏」——
+                // 现场日志里就是这样：一次击杀同时报了 KillWhileNotImpostor 和
+                // SabotageWhileNotImpostor，用户看到的就是「明明是杀人却报了破坏」。
+                //
+                // 栈空（本地调用，非 RPC）时 CallId 为 -1，同样不归因 ——
+                // 本地调用是本机自己的行为，本来也不该算到别人头上。
+                if (RpcContext.CallId != (int)RpcCalls.UpdateSystem) return;
 
                 var track = RpcContext.SenderTrack();
                 if (track == null) return;

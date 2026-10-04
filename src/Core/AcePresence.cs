@@ -85,6 +85,8 @@ namespace ApexCheatEnder.Core
             var local = GameBridge.GetLocalPlayer();
             if (local != null && GameBridge.GetPlayerId(local) == id) return true;
 
+            ModFingerprint.Announce(id, AntiCheatPlugin.PluginGuid);
+
             if (AcePlayers.Add(id))
             {
                 AntiCheatRuntime.Log?.LogInfo(
@@ -156,7 +158,15 @@ namespace ApexCheatEnder.Core
 
             var isAce = AcePlayers.Contains(id);
             var isAmethyst = AmethystPresence.IsAmethystUser(id);
-            if (!isAce && !isAmethyst) return;
+
+            // 自己不打标 —— 头上挂一串标签挡视线，也没意义。
+            var local = GameBridge.GetLocalPlayer();
+            if (local != null && GameBridge.GetPlayerId(local) == id) return;
+
+            // 没装模组的玩家：开关打开时也要打标（默认「原本玩家」）。
+            var cfgNow = AntiCheatRuntime.Config;
+            var isVanilla = !isAce && !isAmethyst;
+            if (isVanilla && !(cfgNow?.MarkVanillaPlayers.Value ?? true)) return;
 
             try
             {
@@ -168,7 +178,14 @@ namespace ApexCheatEnder.Core
                 var nameText = cosmetics.nameText;
                 if (nameText == null) return;
 
-                var want = GameBridge.GetPlayerName(player) + BuildTags(isAce, isAmethyst);
+                var want = GameBridge.GetPlayerName(player) + BuildTags(isAce, isAmethyst, id);
+
+                // Amethyst 用户整段名字上粉色，和它自己的客户端观感一致。
+                // 用富文本包一层而不是改 TextMeshPro.color：名字颜色由游戏每帧写，
+                // 改 Graphic 的颜色会被立刻覆盖并闪烁。
+                if (isAmethyst)
+                    want = "<color=#" + PresenceTags.AmethystNameHex + ">" + want + "</color>";
+
                 if (nameText.text != want) nameText.text = want;
             }
             catch
@@ -177,22 +194,45 @@ namespace ApexCheatEnder.Core
             }
         }
 
-        /// <summary>拼出名字后面的标记串；同时是 ACE 与 Amethyst 用户时两个都显示。</summary>
-        private static string BuildTags(bool isAce, bool isAmethyst)
+        /// <summary>
+        /// 拼出名字后面的标记串 —— **这是显示在玩家头上的「模组身份」**。
+        ///
+        /// 识别来源有两条，结果合在一起显示：
+        ///   1. **RPC 指纹**（被动）：对方发过超出原版范围的 callId 就认出来了，
+        ///      不需要对方配合，作弊端也躲不掉
+        ///   2. **自报家门**：Amethyst / ACE 的互认包，能拿到 GUID
+        ///
+        /// 显示规则（用户明确要求）：
+        ///   · 内置库里查得到 GUID → 显示**模组名字**
+        ///   · 查不到 → **直接显示 GUID 原文**，不留空白，方便拿去搜
+        ///   · 只知道 callId 不知道名字 → 显示「未知模组 #编号」，提示该往库里补
+        ///   · 什么都没识别到 → 显示「原本玩家」（可在配置里关掉）
+        /// </summary>
+        private static string BuildTags(bool isAce, bool isAmethyst, int playerId)
         {
             var cfg = AntiCheatRuntime.Config;
-            var parts = new List<string>(2);
+            var parts = new List<string>(4);
 
-            if (isAce && (cfg?.AcePresenceEnabled.Value ?? true))
+            var detected = ModFingerprint.Of(playerId);
+            foreach (var mod in detected)
             {
-                var tag = cfg?.AcePresenceTag.Value;
-                parts.Add(string.IsNullOrEmpty(tag) ? DefaultTag : tag);
+                if (string.IsNullOrEmpty(mod.Display)) continue;
+
+                // Amethyst 额外带上版本号：它的互认包只传 PlayerId + 版本，
+                // 版本是唯一能进一步区分身份的信息，一并显示更有用。
+                var version = string.Equals(mod.Guid, AmethystPresence.AmethystGuid, System.StringComparison.OrdinalIgnoreCase)
+                    ? AmethystPresence.GetVersion(playerId)
+                    : null;
+
+                parts.Add(string.IsNullOrEmpty(version)
+                    ? "[" + mod.Display + "]"
+                    : "[" + mod.Display + "·" + version + "]");
             }
 
-            if (isAmethyst && (cfg?.AmethystPresenceEnabled.Value ?? true))
+            if (parts.Count == 0 && (cfg?.MarkVanillaPlayers.Value ?? true))
             {
-                var tag = cfg?.AmethystPresenceTag.Value;
-                parts.Add(string.IsNullOrEmpty(tag) ? AmethystPresence.DefaultTag : tag);
+                var tag = cfg?.VanillaPlayerTag.Value;
+                parts.Add(string.IsNullOrEmpty(tag) ? PresenceTags.VanillaDefault : tag);
             }
 
             return parts.Count == 0 ? string.Empty : " " + string.Join(" ", parts);

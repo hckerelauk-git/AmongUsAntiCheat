@@ -98,10 +98,8 @@ namespace ApexCheatEnder.UI
         public static readonly Color FieldBg = new Color32(0x0E, 0x18, 0x28, 0xE6);
 
         /// <summary>虚拟键盘按键底色。</summary>
-        public static readonly Color KeyBg = new Color32(0x1A, 0x28, 0x3E, 0xE8);
 
         /// <summary>虚拟键盘按键悬停态。</summary>
-        public static readonly Color KeyHoverBg = new Color32(0x2E, 0xE6, 0xD6, 0x66);
 
         // ================= 纹理生成 =================
 
@@ -615,6 +613,49 @@ namespace ApexCheatEnder.UI
             var tex = MakeKeyCap(w, h, face, lip, edge);
             KeyCapCache[key] = tex;
             return tex;
+        }
+
+        // ================= 反作弊图标 =================
+
+        private static Texture2D _icon;
+        private static bool _iconTried;
+
+        /// <summary>
+        /// 反作弊图标（内嵌的透明 PNG，128×128）。
+        ///
+        /// 这是整个插件里唯一一张外部画好的位图 —— 其余视觉元素都是代码生成的。
+        /// 失败返回 null，调用方必须判空：拿不到图标只是少个装饰，不该影响界面。
+        /// </summary>
+        public static Texture2D Icon()
+        {
+            if (_iconTried) return _icon;
+            _iconTried = true;
+
+            try
+            {
+                using var stream = System.Reflection.Assembly.GetExecutingAssembly()
+                    .GetManifestResourceStream("ApexCheatEnder.Icon.png");
+                if (stream == null || stream.Length <= 0) return null;
+
+                using var buffer = new System.IO.MemoryStream((int)stream.Length);
+                stream.CopyTo(buffer);
+
+                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (!texture.LoadImage(buffer.ToArray()))
+                {
+                    Object.Destroy(texture);
+                    return null;
+                }
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.filterMode = FilterMode.Bilinear;
+                _icon = texture;
+            }
+            catch
+            {
+                _icon = null;
+            }
+
+            return _icon;
         }
     }
 }

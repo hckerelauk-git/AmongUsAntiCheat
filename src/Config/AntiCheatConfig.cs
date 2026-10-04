@@ -120,8 +120,29 @@ namespace ApexCheatEnder.Config
         /// <summary>Amethyst 用户的名字标记文案。</summary>
         public readonly ConfigEntry<string> AmethystPresenceTag;
 
+        /// <summary>是否给没装模组的玩家也加标记。</summary>
+        public readonly ConfigEntry<bool> MarkVanillaPlayers;
+
+        /// <summary>没装模组的玩家的标记文案。</summary>
+        public readonly ConfigEntry<string> VanillaPlayerTag;
+
         /// <summary>左上角是否显示帧率 / 延迟 / 房主状态条。</summary>
         public readonly ConfigEntry<bool> ShowStatsHud;
+
+        /// <summary>设置窗口宽度（像素，缩放前）。拖右下角改完会自动写回这里。</summary>
+        public readonly ConfigEntry<int> SettingsWindowWidth;
+
+        /// <summary>设置窗口高度（像素，缩放前）。</summary>
+        public readonly ConfigEntry<int> SettingsWindowHeight;
+
+        /// <summary>检测到游戏窗口尺寸异常时是否自动改回可用分辨率。</summary>
+        public readonly ConfigEntry<bool> AutoFixResolution;
+
+        /// <summary>自动修复用的宽度。</summary>
+        public readonly ConfigEntry<int> FixResolutionWidth;
+
+        /// <summary>自动修复用的高度。</summary>
+        public readonly ConfigEntry<int> FixResolutionHeight;
 
         // ================= 爬管道 / 滑索 =================
 
@@ -232,11 +253,19 @@ namespace ApexCheatEnder.Config
                     "游戏里角色的正常速度是固定的，这里允许乘一个倍数当作上限，超出就算超速。" + NL +
                     "1.0 就是完全不放水，正常建议 1.5 ~ 1.8。",
                     new AcceptableValueRange<float>(1.0f, 5.0f)));
-            TeleportMinDistance = cfg.Bind(C, "一下挪多远算瞬移", 4.5f,
+            TeleportMinDistance = cfg.Bind(C, "一下挪多远算瞬移", 8.0f,
                 new ConfigDescription(
-                    "一次记录里位置突然变了这么多，就是瞬移。" + NL +
-                    "这个几乎不可能误判，因为正常走路一秒也走不了这么远。",
-                    new AcceptableValueRange<float>(0.5f, 20f)));
+                    "一次采样里位置突然变了这么多，才按瞬移记录。" + NL +
+                    "原来默认 4.5，实测**会误伤网络延迟校正** —— 客户端位置漂移后" + NL +
+                    "被服务器拉回，一次能差 4~5 单位，那是网络问题不是作弊。" + NL +
+                    "真实瞬移作弊通常一次挪 20 单位以上，8 是安全的中间值。" + NL +
+                    "（爬梯子、钻管道、站移动平台已单独豁免，不靠这个阈值兜。）",
+                    new AcceptableValueRange<float>(1f, 60f)));
+
+            // 一次性迁移：旧默认 4.5 会误伤延迟校正，升到 8.0。
+            // 只在用户没自己改过（值仍是旧默认）时才动。
+            if (System.Math.Abs(TeleportMinDistance.Value - 4.5f) < 0.001f)
+                TeleportMinDistance.Value = 8.0f;
             SpeedStrikeCount = cfg.Bind(C, "超速几次才记下来", 3,
                 new ConfigDescription(
                     "偶尔超一下可能是卡了。连续超这么多次，才当成作弊证据。",
@@ -289,10 +318,12 @@ namespace ApexCheatEnder.Config
                 "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。");
             ShowNotifications = cfg.Bind(F, "屏幕顶部弹出提醒", true,
                 "命中检测规则时在屏幕上方弹一条通知。");
-            NotificationDuration = cfg.Bind(F, "提醒停留几秒", 5f,
+            NotificationDuration = cfg.Bind(F, "提醒停留几秒", 12f,
                 new ConfigDescription(
-                    "通知自动消失的时间。",
-                    new AcceptableValueRange<float>(1f, 20f)));
+                    "通知自动消失的时间。" + NL +
+                    "原来默认 5 秒，实际看的时候经常还没读完就消失了，已放宽到 12 秒。" + NL +
+                    "上限也提到 60 秒 —— 想让它一直挂着看也行。",
+                    new AcceptableValueRange<float>(2f, 60f)));
 
             ShowChatAbuseNotice = cfg.Bind(F, "疑似骂人短提示", true,
                 "仅聊天匹配关键词时在本地游戏 Canvas 显示图片 1.2 秒，Esc 关闭，10 秒冷却。" + NL +
@@ -324,13 +355,51 @@ namespace ApexCheatEnder.Config
                 "它自己会周期性广播一条识别包。这里只**旁听**那条包，" + NL +
                 "认出谁装了 Amethyst，在名字后面加标记。" + NL +
                 "不会给 Amethyst 发任何东西，也不会拦它的包。");
+            MarkVanillaPlayers = cfg.Bind(F, "标记非模组玩家", true,
+                "给没装任何模组的玩家也加一个标记，默认「原本玩家」。" + NL +
+                "开着的话每个人头上都有标识：装模组的显示模组身份，没装的显示这个。");
+            VanillaPlayerTag = cfg.Bind(F, "非模组玩家标记写成什么", Core.PresenceTags.VanillaDefault,
+                "显示在没装模组的玩家名字后面的文字。");
+
             AmethystPresenceTag = cfg.Bind(F, "Amethyst 标记写成什么", Core.PresenceTags.AmethystDefault,
-                "显示在 Amethyst 用户名字后面的文字。");
+                "显示在 Amethyst 用户名字后面的文字。" + NL +
+                "Amethyst 用户的名字会整段显示为粉色，无需另行设置。");
+
+            // 一次性迁移：旧默认是紫心 💜，新默认是粉心 💗。
+            // BepInEx 把默认值写进 cfg 文件后，改默认值对已有配置不再生效，
+            // 所以这里显式把「恰好还等于旧默认值」的配置迁过去。
+            // 只在用户没自己改过时才动，不会覆盖自定义文案。
+            if (AmethystPresenceTag.Value == Core.PresenceTags.LegacyAmethystTag)
+                AmethystPresenceTag.Value = Core.PresenceTags.AmethystDefault;
 
             ShowStatsHud = cfg.Bind(F, "显示帧率延迟房主", true,
                 "屏幕左上角显示一行小字：当前帧率、与服务器的延迟、" + NL +
                 "以及自己是房主还是普通客户端。" + NL +
                 "只在连上房间后显示；延迟超过 100 毫秒变黄、超过 200 毫秒变红。");
+
+            SettingsWindowWidth = cfg.Bind(F, "设置窗口宽度", 1000,
+                new ConfigDescription(
+                    "设置界面的宽度（像素）。" + NL +
+                    "也可以直接拖窗口右下角的小方块调整，松手后会自动写回这里。",
+                    new AcceptableValueRange<int>(640, 1920)));
+            SettingsWindowHeight = cfg.Bind(F, "设置窗口高度", 700,
+                new ConfigDescription(
+                    "设置界面的高度（像素）。" + NL +
+                    "屏幕装不下时会自动等比缩小，不会超出屏幕。",
+                    new AcceptableValueRange<int>(460, 1200)));
+
+            AutoFixResolution = cfg.Bind(F, "窗口尺寸异常时自动改回", true,
+                "游戏会把「当前窗口大小」当成分辨率存进自己的设置里。" + NL +
+                "一旦某次被压成极小尺寸，之后每次启动都会还原成那个小窗口，" + NL +
+                "自己永远好不了（实测过 160×40，1 像素高，基本看不见）。" + NL +
+                "开着这个，插件发现窗口小于 800×480 就自动改回下面设置的分辨率。");
+            FixResolutionWidth = cfg.Bind(F, "自动改回多宽", 1280,
+                new ConfigDescription("自动修复时使用的宽度。",
+                    new AcceptableValueRange<int>(800, 3840)));
+            FixResolutionHeight = cfg.Bind(F, "自动改回多高", 600,
+                new ConfigDescription("自动修复时使用的高度。",
+                    new AcceptableValueRange<int>(480, 2160)));
+
 
             // ---------------- 爬管道 / 滑索 ----------------
             const string G = "爬管道和滑索";

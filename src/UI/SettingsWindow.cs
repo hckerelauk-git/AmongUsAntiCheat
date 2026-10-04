@@ -16,12 +16,25 @@ namespace ApexCheatEnder.UI
     /// </summary>
     internal static class SettingsWindow
     {
-        private const float WindowWidth = 800f;
-        private const float WindowHeight = 560f;
-        private const float TitleBarHeight = 64f;
-        private const float TabColumnWidth = 170f;
-        private const float FooterHeight = 46f;
-        private const float ContentPadding = 28f;
+        // 窗口尺寸改为可调：拖右下角的小方块改，松手写回配置，下次启动沿用。
+        // 默认 1000x700（800x560 → 1000x700 是因为用户反馈字太小）。
+        private const float DefaultWindowWidth = 960f;
+        private const float DefaultWindowHeight = 620f;
+        private static float WindowWidth = DefaultWindowWidth;
+        private static float WindowHeight = DefaultWindowHeight;
+
+        /// <summary>拖拽缩放时的下限与上限。太小放不下内容，太大没意义。</summary>
+        private const float MinWindowWidth = 640f;
+        private const float MaxWindowWidth = 1920f;
+        private const float MinWindowHeight = 460f;
+        private const float MaxWindowHeight = 1200f;
+
+        /// <summary>右下角缩放手柄的边长。</summary>
+        private const float ResizeGripSize = 22f;
+        private const float TitleBarHeight = 72f;
+        private const float TabColumnWidth = 148f;
+        private const float FooterHeight = 54f;
+        private const float ContentPadding = 34f;
 
         // ================= 开关控件尺寸 =================
         // 轨道 52×26，滑块直径 20，左右各留 3px 内边距。
@@ -31,8 +44,8 @@ namespace ApexCheatEnder.UI
 
         // ================= 侧边栏尺寸 =================
         // 页签 44 高、间隔 52：留 8px 空隙，比原来 42/48 更透气。
-        private const float TabHeight = 44f;
-        private const float TabSpacing = 52f;
+        private const float TabHeight = 50f;
+        private const float TabSpacing = 58f;
 
         /// <summary>窗口圆角半径（与监控面板同一套 9 宫格卡片）。</summary>
         private const int WindowRadius = 16;
@@ -76,15 +89,15 @@ namespace ApexCheatEnder.UI
         private static Text _pageTitleText;
         private static Text _pageHintText;
         private static Text _footerText;
+        private static Text _hintText;
         private static int _currentPage;
 
         private static readonly List<TabEntry> Tabs = new List<TabEntry>();
         private static readonly List<RowEntry> Rows = new List<RowEntry>();
 
-        private static readonly List<GameObject> Cards = new List<GameObject>();
-        private static readonly List<RowEntry> CardHeaders = new List<RowEntry>();
+        /// <summary>分组小标题的节点，换页时统一销毁。</summary>
+        private static readonly List<GameObject> Captions = new List<GameObject>();
         private static readonly List<TabEntry> SubTabs = new List<TabEntry>();
-        private static readonly HashSet<string> CollapsedCards = new HashSet<string>();
         private static readonly int[] SelectedSubTabs = new int[6];
         private static readonly DoubleClickConfirmation RestoreConfirmation = new DoubleClickConfirmation();
         private static string _exportStatus = "点击导出";
@@ -94,9 +107,15 @@ namespace ApexCheatEnder.UI
         private static int _preset;
         private static RectTransform _subTabArea;
         private static RowEntry _activeSlider;
-        private static readonly List<TextInputField> TextInputs = new List<TextInputField>();
         private static RectTransform _windowRect;
         private static RectTransform _titleRect;
+        private static RectTransform _resizeGrip;
+        private static Transform _canvasRoot;
+        private static bool _windowResizing;
+        private static Vector2 _resizeStartMouse;
+        private static float _resizeStartWidth;
+        private static float _resizeStartHeight;
+        private static float _nextLiveRelayout;
         private static bool _windowDragging;
         private static bool _scrollDragging;
         private static bool _gestureMoved;
@@ -133,11 +152,19 @@ namespace ApexCheatEnder.UI
 
             /// <summary>开关行的滑块（仅 Toggle 行有）。移动它来表达开/关。</summary>
             public RectTransform SwitchKnob;
+
+            /// <summary>
+            /// 这一行的说明文字。
+            ///
+            /// 行内不显示，鼠标悬停时由底部描述栏显示 —— 这是把界面从
+            /// 「拥挤臃肿」压下去的关键：行高因此从 100 降到 46。
+            /// </summary>
+            public string Hint;
         }
 
         // ================= 行模型 =================
 
-        private enum RowKind { Toggle, Number, Info, Action, TextField }
+        private enum RowKind { Toggle, Number, Info, Action }
 
         private sealed class SettingRow
         {
@@ -162,8 +189,6 @@ namespace ApexCheatEnder.UI
             public Action OnToggle;
             public Action OnMinus;
             public Action OnPlus;
-            public Func<string> GetText;
-            public Action<string> SetText;
         }
 
         private static readonly string[] TabNames =
@@ -208,7 +233,16 @@ namespace ApexCheatEnder.UI
             if (_built || canvasRoot == null) return;
             _built = true;
 
-            var font = UiBuilder.LoadFont(13);
+            _canvasRoot = canvasRoot;
+
+            // 尺寸优先取用户上次拖出来的值，取不到才用默认。
+            var cfg = AntiCheatRuntime.Config;
+            WindowWidth = Mathf.Clamp(cfg?.SettingsWindowWidth.Value ?? (int)DefaultWindowWidth,
+                MinWindowWidth, MaxWindowWidth);
+            WindowHeight = Mathf.Clamp(cfg?.SettingsWindowHeight.Value ?? (int)DefaultWindowHeight,
+                MinWindowHeight, MaxWindowHeight);
+
+            var font = UiBuilder.LoadFont(15);
 
             _root = UiBuilder.CreateNode("AceSettings", canvasRoot);
             var rootRect = _root.GetComponent<RectTransform>();
@@ -227,37 +261,36 @@ namespace ApexCheatEnder.UI
             bg.type = Image.Type.Sliced;
             UiBuilder.Stretch(bg.rectTransform, 0f, 0f, 0f, 0f);
 
-            // ---- 顶部强调条 ----
-            // 原先是横贯整个窗口宽度的亮青色条（1060×3），在一块深色卡片上
-            // 非常抢眼，把注意力从内容上抢走了。改成只覆盖标题区宽度的一小段，
-            // 当「标题下的点睛线」用 —— 有设计感，但不喧宾夺主。
-            var topBar = UiBuilder.CreateImage("TopBar", _root.transform, AceTheme.Primary);
-            topBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
-            topBar.type = Image.Type.Sliced;
-            UiBuilder.Place(topBar.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(18f, -14f), new Vector2(132f, 2f));
+            // ---- 标题区 ----
+            // 装饰件全部拆掉：横贯窗口的顶部强调条、盾牌图标、四处分隔线、状态条。
+            // 它们各自都不大，叠在一起就是「拥挤臃肿」的来源。
+            // 现在只留图标 + 标题 + 一行副标题 + 右侧快捷键提示，靠留白撑开。
+            var iconTex = AceTheme.Icon();
+            if (iconTex != null)
+            {
+                var icon = UiBuilder.CreateImage("Icon", _root.transform, Color.white, iconTex);
+                icon.raycastTarget = false;
+                UiBuilder.Place(icon.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(18f, -16f), new Vector2(32f, 32f));
+            }
 
-            var shieldTex = AceTheme.MakeShield(48, AceTheme.Primary, AceTheme.Accent);
-            var shield = UiBuilder.CreateImage("Shield", _root.transform, Color.white, shieldTex);
-            UiBuilder.Place(shield.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(18f, -18f), new Vector2(32f, 32f));
+            // 有图标时标题右移，没有就贴左 —— 图标缺失也不该让标题错位到中间。
+            var titleLeft = iconTex != null ? 60f : 18f;
 
             var title = CreateText("Title", _root.transform,
-                "APEX CHEAT ENDER", font, 16, AceTheme.TextMain, TextAnchor.UpperLeft, FontStyle.Bold);
+                "Apex Cheat Ender", font, 17, AceTheme.TextMain, TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(title.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(62f, -17f), new Vector2(320f, 26f));
+                new Vector2(titleLeft, -16f), new Vector2(360f, 24f));
 
-            // 这句是普通说明，不是「操作成功」的状态提示，用绿色（Success）会
-            // 让人以为刚刚发生了什么。改用次要文字色。
             var subtitle = CreateText("SubTitle", _root.transform,
-                "设置", font, 11, AceTheme.TextDim);
+                "设置", font, 12, AceTheme.TextDim);
             UiBuilder.Place(subtitle.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(62f, -40f), new Vector2(340f, 18f));
+                new Vector2(titleLeft, -38f), new Vector2(360f, 18f));
 
             var hint = CreateText("Hint", _root.transform,
-                "Insert 关闭", font, 11, AceTheme.TextDim, TextAnchor.UpperRight);
+                "Insert 关闭", font, 12, AceTheme.TextDim, TextAnchor.UpperRight);
             UiBuilder.Place(hint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(WindowWidth - 180f, -20f), new Vector2(160f, 20f));
+                new Vector2(WindowWidth - 180f, -18f), new Vector2(160f, 20f));
 
             var divTop = UiBuilder.CreateImage("DivTop", _root.transform, AceTheme.Border);
             UiBuilder.Place(divTop.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
@@ -272,25 +305,18 @@ namespace ApexCheatEnder.UI
                 new Vector2(0f, (FooterHeight - TitleBarHeight) / 2f),
                 new Vector2(TabColumnWidth, WindowHeight - TitleBarHeight - FooterHeight));
 
-            var tabBg = UiBuilder.CreateImage("TabBg", _root.transform, AceTheme.TabColumnBg);
-            UiBuilder.Place(tabBg.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(0f, (FooterHeight - TitleBarHeight) / 2f),
-                new Vector2(TabColumnWidth, WindowHeight - TitleBarHeight - FooterHeight));
-
-            var divLeft = UiBuilder.CreateImage("DivLeft", _root.transform, AceTheme.Border);
-            UiBuilder.Place(divLeft.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                new Vector2(TabColumnWidth, (FooterHeight - TitleBarHeight) / 2f),
-                new Vector2(1f, WindowHeight - TitleBarHeight - FooterHeight));
+            // 页签不再套一层底色方框，也不画左侧分隔线：
+            // 选中态用文字色 + 一条竖色条表达，未选中就是普通灰字。
 
             // ---- 页标题与页说明：固定在窗口上，不随内容滚动 ----
             var textLeft = TabColumnWidth + ContentPadding;
             _pageTitleText = CreateText("PageTitle", _root.transform,
-                "", font, 15, AceTheme.Accent, TextAnchor.UpperLeft, FontStyle.Bold);
+                "", font, 17, AceTheme.Accent, TextAnchor.UpperLeft, FontStyle.Bold);
             UiBuilder.Place(_pageTitleText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(textLeft, -TitleBarHeight - 10f), new Vector2(500f, 22f));
 
             _pageHintText = CreateText("PageHint", _root.transform,
-                "", font, 11, AceTheme.TextDim, TextAnchor.UpperLeft);
+                "", font, 13, AceTheme.TextDim, TextAnchor.UpperLeft);
             UiBuilder.Place(_pageHintText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(textLeft, -TitleBarHeight - 32f), new Vector2(WindowWidth - textLeft - ContentPadding, 24f));
 
@@ -323,19 +349,39 @@ namespace ApexCheatEnder.UI
             UiBuilder.Place(divBottom.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(0f, FooterHeight), new Vector2(WindowWidth, 1f));
 
+            // ---- 底部描述栏 ----
+            // 行的说明文字全部搬到这里，鼠标悬停哪一行就显示哪一行的说明。
+            // 这是把界面从「拥挤臃肿」压下去的关键：行内只剩名称 + 控件，
+            // 行高从 100 降到 46，一屏能看到的设置项翻了一倍多。
+            _hintText = CreateText("HintBar", _root.transform,
+                "", font, 12, AceTheme.TextMain);
+            UiBuilder.Place(_hintText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(18f, 28f), new Vector2(WindowWidth - 36f, 20f));
+            _hintText.verticalOverflow = VerticalWrapMode.Truncate;
+
             _footerText = CreateText("Footer", _root.transform,
                 "", font, 11, AceTheme.TextDim);
             UiBuilder.Place(_footerText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(18f, 10f), new Vector2(WindowWidth - 36f, 20f));
-
-            var statusBar = UiBuilder.CreateImage("StatusBar", _root.transform, AceTheme.Success);
-            statusBar.sprite = AceTheme.Card(2, 0, Color.white, Color.white);
-            statusBar.type = Image.Type.Sliced;
-            UiBuilder.Place(statusBar.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(10f, 10f), new Vector2(WindowWidth - 20f, 3f));
+                new Vector2(18f, 9f), new Vector2(WindowWidth - 36f, 18f));
 
             // 导航置于固定背景之后，且完全脱离 RectMask2D。
             tabAreaNode.transform.SetAsLastSibling();
+
+            // ---- 右下角缩放手柄 ----
+            // 三个沿对角线递减的小方块，是通用的「可拖拽缩放」视觉语言。
+            var gripNode = UiBuilder.CreateNode("ResizeGrip", _root.transform);
+            _resizeGrip = gripNode.GetComponent<RectTransform>();
+            UiBuilder.Place(_resizeGrip, new Vector2(1f, 0f), new Vector2(1f, 0f),
+                new Vector2(-4f, 4f), new Vector2(ResizeGripSize, ResizeGripSize));
+            for (var i = 0; i < 3; i++)
+            {
+                var dot = UiBuilder.CreateImage("GripDot" + i, gripNode.transform, AceTheme.TextDim);
+                dot.raycastTarget = false;
+                var size = 4f - i;
+                UiBuilder.Place(dot.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f),
+                    new Vector2(-2f - i * 6f, 2f + i * 6f), new Vector2(size + 2f, size + 2f));
+            }
+
             BuildTabs(font);
             SwitchPage(0);
 
@@ -374,12 +420,13 @@ namespace ApexCheatEnder.UI
                 var glyph = UiBuilder.CreateImage("Glyph" + i, node.transform,
                     AceTheme.TextDim, AceTheme.Glyph(TabGlyphs[i], 18, Color.white));
                 UiBuilder.Place(glyph.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    new Vector2(20f, 0f), new Vector2(18f, 18f));
+                    new Vector2(16f, 0f), new Vector2(18f, 18f));
 
                 var label = CreateText("TabLabel" + i, node.transform,
-                    TabNames[i], font, 13, AceTheme.TextDim, TextAnchor.MiddleLeft);
+                    TabNames[i], font, 14, AceTheme.TextDim, TextAnchor.MiddleLeft);
                 UiBuilder.Place(label.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    new Vector2(48f, 0f), new Vector2(TabColumnWidth - 78f, 26f));
+                    new Vector2(42f, 0f), new Vector2(TabColumnWidth - 50f, 26f));
+                label.horizontalOverflow = HorizontalWrapMode.Overflow;
 
                 Tabs.Add(new TabEntry
                 {
@@ -441,7 +488,7 @@ namespace ApexCheatEnder.UI
                 var image = UiBuilder.CreateImage("SubTab" + i, _subTabArea, i == SelectedSubTabs[page] ? AceTheme.TabActiveBg : AceTheme.RowBgA);
                 UiBuilder.Place(image.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                     new Vector2(i * (width + 6f), 0f), new Vector2(width, 30f));
-                var text = CreateText("Label", image.transform, names[i], UiBuilder.LoadFont(13), 12,
+                var text = CreateText("Label", image.transform, names[i], UiBuilder.LoadFont(14), 13,
                     i == SelectedSubTabs[page] ? AceTheme.Accent : AceTheme.TextDim, TextAnchor.MiddleCenter);
                 UiBuilder.Stretch(text.rectTransform, 4f, 4f, 0f, 0f);
                 SubTabs.Add(new TabEntry { Index = i, Rect = image.rectTransform });
@@ -454,140 +501,117 @@ namespace ApexCheatEnder.UI
         {
             _activeSlider = null;
             _pressArmed = _scrollDragging = false;
-            foreach (var card in Cards)
+
+            // ── 清空内容区 ──
+            // 行和分组标题现在都直接挂在 _contentArea 下面。
+            // 原来只销毁分组标题、不销毁行节点，于是换页或改配置触发重建时，
+            // 旧行会留在原地和新行叠在一起 —— 现场表现就是文字重影、糊成一团。
+            // 必须整个清空，重建才是干净的。
+            if (_contentArea != null)
             {
-                card.SetActive(false);
-                UnityEngine.Object.Destroy(card);
+                for (var c = _contentArea.childCount - 1; c >= 0; c--)
+                {
+                    var child = _contentArea.GetChild(c);
+                    if (child == null) continue;
+                    child.gameObject.SetActive(false);
+                    UnityEngine.Object.Destroy(child.gameObject);
+                }
             }
-            Cards.Clear();
-            CardHeaders.Clear();
+
+            Captions.Clear();
             Rows.Clear();
-            TextInputs.Clear();
 
             // 换页回到顶部：否则会停留在上一页的滚动位置，看起来像"内容没了"
             _scrollOffset = 0f;
             _scrollVelocity = 0f;
 
             var model = BuildPageModel(page);
-            var font = UiBuilder.LoadFont(13);
+            var font = UiBuilder.LoadFont(15);
             var contentWidth = WindowWidth - TabColumnWidth - ContentPadding * 2f;
 
+            // ── 扁平列表 ──
+            // 不再用「卡片 + 可折叠分组」：那是两级导航，用户要展开才知道里面有什么，
+            // 而且每张卡片都有自己的圆角底板与边框，视觉上非常碎。
+            // 现在改成：分组只作为一行小号标题文字，内容直接跟在后面，一次看完。
             var cursor = 0f;
             var group = -1;
-            RectTransform cardBody = null;
-            var bodyCursor = 38f;
-            var collapsed = false;
             for (var i = 0; i < model.Count; i++)
             {
                 var row = model[i];
                 var rowGroup = SettingsLayout.Group(page, i);
                 if (page == 1 && rowGroup != SelectedSubTabs[page]) continue;
+
                 if (group != rowGroup)
                 {
                     group = rowGroup;
-                    var key = page + ":" + group;
-                    collapsed = CollapsedCards.Contains(key);
-                    var bodyHeight = 0f;
-                    for (var j = i; j < model.Count && SettingsLayout.Group(page, j) == group; j++)
-                        bodyHeight += SettingsLayout.RowHeight(model[j].Kind == RowKind.Number);
-                    var height = SettingsLayout.CardHeight(bodyHeight, collapsed);
-                    var card = UiBuilder.CreateImage("Group" + group, _contentArea, Color.white);
-                    card.sprite = AceTheme.Card(8, 1, AceTheme.RowBgA, AceTheme.RowBorder);
-                    card.type = Image.Type.Sliced;
-                    UiBuilder.Place(card.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                        new Vector2(0f, -cursor), new Vector2(contentWidth, height));
-                    Cards.Add(card.gameObject);
-                    cardBody = card.rectTransform;
-                    var header = CreateText("GroupTitle", card.transform,
-                        (collapsed ? ">  " : "v  ") + (page < SettingsLayout.GroupNames.Length ? SettingsLayout.GroupNames[page][group] : "本地记录与工具"), font, 13, AceTheme.Accent,
-                        TextAnchor.MiddleLeft, FontStyle.Bold);
-                    UiBuilder.Place(header.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                        new Vector2(14f, 0f), new Vector2(contentWidth - 28f, 38f));
-                    CardHeaders.Add(new RowEntry { Rect = header.rectTransform, Model = new SettingRow
-                    {
-                        OnToggle = () =>
-                        {
-                            if (!CollapsedCards.Add(key)) CollapsedCards.Remove(key);
-                            BuildRows(page);
-                        }
-                    } });
-                    cursor += height + 10f;
-                    bodyCursor = 38f;
+                    var caption = CreateText("Section" + group, _contentArea,
+                        page < SettingsLayout.GroupNames.Length && group < SettingsLayout.GroupNames[page].Length
+                            ? SettingsLayout.GroupNames[page][group]
+                            : "其他",
+                        font, 12, AceTheme.TextDim, TextAnchor.LowerLeft);
+                    UiBuilder.Place(caption.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                        new Vector2(2f, -cursor), new Vector2(contentWidth, SettingsLayout.SectionCaptionHeight));
+                    caption.supportRichText = false;
+                    Captions.Add(caption.gameObject);
+                    cursor += SettingsLayout.SectionCaptionHeight;
                 }
-                if (collapsed) continue;
+
                 var rowHeight = SettingsLayout.RowHeight(row.Kind == RowKind.Number);
-                var y = -bodyCursor;
-                bodyCursor += rowHeight;
-                var node = UiBuilder.CreateNode("Row" + i, cardBody);
+                var y = -cursor;
+                cursor += rowHeight;
+
+                var node = UiBuilder.CreateNode("Row" + i, _contentArea);
                 var rect = node.GetComponent<RectTransform>();
                 UiBuilder.Place(rect, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(0f, y), new Vector2(contentWidth, rowHeight - 4f));
+                    new Vector2(0f, y), new Vector2(contentWidth, rowHeight));
 
-                // 圆角行底板 + 斑马纹
-                var bg = node.AddComponent<Image>();
-                bg.sprite = AceTheme.Card(3, 0,
-                    i % 2 == 0 ? AceTheme.RowBgA : AceTheme.RowBgB,
-                    AceTheme.RowBorder);
-                bg.type = Image.Type.Sliced;
-                bg.raycastTarget = false;
+                // 行底不再是一块圆角卡片，只用一条极细分隔线。
+                // 描边颜色压到很低的不透明度，靠留白分隔而不是靠框线。
+                var divider = UiBuilder.CreateImage("Divider", node.transform, AceTheme.Border);
+                divider.raycastTarget = false;
+                UiBuilder.Place(divider.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(0f, 0f), new Vector2(contentWidth, 1f));
 
-                // 标题与说明之间留 4px 间隙：说明字号更小、颜色更暗，
-                // 靠「字号 + 灰度 + 间距」三重区分层级，不再靠挤在一起
+                // 名称：单行、垂直居中，不再为说明文字预留第二行
                 var label = CreateText("RowLabel" + i, node.transform,
-                    row.Label, font, 13, AceTheme.TextMain, TextAnchor.UpperLeft);
-                UiBuilder.Place(label.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(16f, -8f), new Vector2(contentWidth - (row.Kind == RowKind.TextField ? 290f : row.Kind == RowKind.Info || row.Kind == RowKind.Action ? 150f : 100f), 20f));
-                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                    row.Label, font, 14, AceTheme.TextMain, TextAnchor.MiddleLeft);
+                UiBuilder.Place(label.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                    new Vector2(2f, 0f), new Vector2(contentWidth - 140f, rowHeight));
+                label.horizontalOverflow = HorizontalWrapMode.Overflow;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
                 label.supportRichText = false;
 
-                var hint = CreateText("RowHint" + i, node.transform,
-                    row.Hint ?? string.Empty, font, 11, AceTheme.TextDim, TextAnchor.UpperLeft);
-                UiBuilder.Place(hint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(16f, -29f), new Vector2(contentWidth - (row.Kind == RowKind.TextField ? 290f : row.Kind == RowKind.Info || row.Kind == RowKind.Action ? 150f : 100f), 26f));
-                hint.horizontalOverflow = HorizontalWrapMode.Wrap;
-                hint.verticalOverflow = VerticalWrapMode.Truncate;
-                hint.supportRichText = false;
-
-                if (row.Kind == RowKind.TextField)
-                {
-                    // 密钥行：右侧挂一个真正的输入控件。
-                    var hostNode = UiBuilder.CreateNode("InputHost", node.transform);
-                    var hostRect = hostNode.GetComponent<RectTransform>();
-                        UiBuilder.Place(hostRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                        new Vector2(-16f, 0f), new Vector2(260f, 30f));
-
-                    TextInputs.Add(new TextInputField(hostRect, row.GetText, row.SetText, false, "点这里输入文字"));
-                    Rows.Add(new RowEntry { Model = row, Rect = rect, Background = bg });
-                    continue;
-                }
+                // 说明不再逐行显示，改为鼠标悬停时在底部描述栏显示。
+                // 这是把「拥挤臃肿」压下去最关键的一步：行高直接砍掉一半以上。
+                var hintText = row.Hint ?? string.Empty;
 
                 if (row.Kind == RowKind.Number)
                 {
                     var value = CreateText("RowValue" + i, node.transform,
-                        "", font, 13, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
-                    UiBuilder.Place(value.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                        new Vector2(-16f, -8f), new Vector2(76f, 20f));
-                    var inset = row.Integer ? 52f : 22f;
+                        "", font, 14, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
+                    UiBuilder.Place(value.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                        new Vector2(-2f, 0f), new Vector2(70f, rowHeight));
+                    var inset = row.Integer ? 46f : 18f;
                     var slider = UiBuilder.CreateNode("SliderHit", node.transform).GetComponent<RectTransform>();
-                    UiBuilder.Place(slider, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                        new Vector2(inset, -58f), new Vector2(contentWidth - inset * 2f, 24f));
+                    UiBuilder.Place(slider, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                        new Vector2(-78f, 0f), new Vector2(200f, 28f));
                     var track = UiBuilder.CreateImage("Track", slider, AceTheme.SwitchOff);
                     UiBuilder.Place(track.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                        Vector2.zero, new Vector2(contentWidth - inset * 2f, 6f));
+                        new Vector2(inset, 0f), new Vector2(200f - inset * 2f, 4f));
                     var fill = UiBuilder.CreateImage("Fill", slider, AceTheme.Accent);
                     UiBuilder.Place(fill.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                        Vector2.zero, new Vector2(0f, 6f));
+                        new Vector2(inset, 0f), new Vector2(0f, 4f));
                     var knob = UiBuilder.CreateImage("SliderKnob", slider, AceTheme.SwitchKnob);
-                    knob.sprite = AceTheme.Dot(14, Color.white);
+                    knob.sprite = AceTheme.Dot(12, Color.white);
                     UiBuilder.Place(knob.rectTransform, new Vector2(0f, 0.5f), new Vector2(0.5f, 0.5f),
-                        Vector2.zero, new Vector2(14f, 14f));
+                        new Vector2(inset, 0f), new Vector2(12f, 12f));
                     Rows.Add(new RowEntry
                     {
-                        Model = row, Rect = rect, Background = bg, Value = value,
+                        Model = row, Rect = rect, Background = null, Value = value,
                         SliderRect = slider, SliderFill = fill.rectTransform, SliderKnob = knob.rectTransform,
-                        MinusRect = row.Integer ? BuildArrow(node.transform, font, 14f, "<", AceTheme.BtnMinusBg) : null,
-                        PlusRect = row.Integer ? BuildArrow(node.transform, font, contentWidth - 38f, ">", AceTheme.BtnPlusBg) : null,
+                        Hint = hintText,
+                        MinusRect = row.Integer ? BuildArrow(node.transform, font, 0f, "<", AceTheme.BtnMinusBg) : null,
+                        PlusRect = row.Integer ? BuildArrow(node.transform, font, 30f, ">", AceTheme.BtnPlusBg) : null,
                     });
                     continue;
                 }
@@ -599,7 +623,7 @@ namespace ApexCheatEnder.UI
                     var swNode = UiBuilder.CreateNode("Switch", node.transform);
                     var swRect = swNode.GetComponent<RectTransform>();
                     UiBuilder.Place(swRect, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                        new Vector2(-18f, -2f), new Vector2(52f, 26f));
+                        new Vector2(-2f, 0f), new Vector2(46f, 24f));
 
                     // 贴图一律用白色，状态色交给 Image.color。
                     // 若把底色烤进贴图，Image.color 会与之相乘：
@@ -622,23 +646,25 @@ namespace ApexCheatEnder.UI
                     {
                         Model = row,
                         Rect = rect,
-                        Background = bg,
+                        Background = null,
                         SwitchTrack = track,
                         SwitchKnob = knobRect,
+                        Hint = hintText,
                     });
                     continue;
                 }
 
                 var normalValue = CreateText("RowValue" + i, node.transform,
-                    "", font, 13, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
+                    "", font, 14, AceTheme.Accent, TextAnchor.MiddleRight, FontStyle.Bold);
                 UiBuilder.Place(normalValue.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                    new Vector2(-16f, 0f), new Vector2(110f, 30f));
+                    new Vector2(-2f, 0f), new Vector2(120f, rowHeight));
                 Rows.Add(new RowEntry
                 {
                     Model = row,
                     Rect = rect,
-                    Background = bg,
+                    Background = null,
                     Value = normalValue,
+                    Hint = hintText,
                 });
             }
 
@@ -646,6 +672,30 @@ namespace ApexCheatEnder.UI
             _contentArea.sizeDelta = new Vector2(0f, Mathf.Max(_contentHeight, _viewportHeight));
             _contentArea.anchoredPosition = Vector2.zero;
             RefreshRowValues();
+        }
+
+        /// <summary>
+        /// 悬停哪一行，就在底部描述栏显示哪一行的说明。
+        ///
+        /// 说明文字不再逐行常驻显示，这是把行高压到 46 的前提。
+        /// 找不到悬停行时保留上一次的说明 —— 鼠标在行间移动时文字不会闪。
+        /// </summary>
+        private static void UpdateHoverHint(Vector2 mouse)
+        {
+            if (_hintText == null) return;
+
+            foreach (var row in Rows)
+            {
+                if (row.Rect == null) continue;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(row.Rect, mouse, null)) continue;
+
+                var hint = row.Hint;
+                if (string.IsNullOrEmpty(hint)) return;
+
+                var want = row.Model.Label + " —— " + hint;
+                if (_hintText.text != want) _hintText.text = want;
+                return;
+            }
         }
 
         private static Text CreateText(string name, Transform parent, string content, Font font, int size,
@@ -661,8 +711,9 @@ namespace ApexCheatEnder.UI
         private static RectTransform BuildArrow(Transform parent, Font font, float x, string label, Color color)
         {
             var image = UiBuilder.CreateImage("Arrow", parent, color);
-            UiBuilder.Place(image.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(x, -58f), new Vector2(24f, 24f));
+            // 行高统一 46 后，加减按钮垂直居中在行内，不再按旧的 58 偏移。
+            UiBuilder.Place(image.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                new Vector2(-x, 0f), new Vector2(24f, 24f));
             var text = CreateText("Label", image.transform, label, font, 14, AceTheme.TextMain, TextAnchor.MiddleCenter);
             UiBuilder.Stretch(text.rectTransform, 0f, 0f, 0f, 0f);
             return image.rectTransform;
@@ -757,25 +808,8 @@ namespace ApexCheatEnder.UI
                 "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
             list.Add(Toggle("标记同装 ACE 的玩家", cfg.AcePresenceEnabled,
                 "跟同样装了 Apex Cheat Ender 的人互相认一下，在对方名字上加个标记。"));
-            list.Add(new SettingRow
-            {
-                Label = "标记写成什么",
-                Hint = "显示在对方名字后面的文字。默认带表情符号；"
-                     + "游戏里若显示成方块，改成纯文字（比如 [ACE]）即可。",
-                Kind = RowKind.TextField,
-                GetValue = () => string.IsNullOrEmpty(cfg.AcePresenceTag.Value)
-                    ? "（默认）"
-                    : "已自定义",
-                GetText = () => cfg.AcePresenceTag.Value ?? string.Empty,
-                SetText = v =>
-                {
-                    cfg.AcePresenceTag.Value = string.IsNullOrEmpty(v)
-                        ? Core.AcePresence.DefaultTag
-                        : v;
-                    FlashSaved();
-                    AntiCheatRuntime.ApplyConfigChange();
-                },
-            });
+            list.Add(Info("名字标记文案", "改标记文字请直接编辑配置文件 apex.cheat.ender.cfg。",
+                () => string.IsNullOrEmpty(cfg.AcePresenceTag.Value) ? "（默认）" : "已自定义"));
             list.Add(Toggle("抓非法破坏", cfg.SabotageCheck, "检查破坏者角色、会议状态和目标范围。"));
             list.Add(Toggle("抓角色动作异常", cfg.RoleActionCheck, "检查变形、保护等角色能力是否合法。"));
             list.Add(Toggle("抓聊天刷屏和非法消息", cfg.ChatCheck, "检查聊天频率和消息内容。"));
@@ -784,18 +818,9 @@ namespace ApexCheatEnder.UI
                 "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
             list.Add(Toggle("疑似骂人短提示", cfg.ShowChatAbuseNotice,
                 "仅本地提示 1.2 秒，Esc 关闭；可能误报，不记作弊证据、不踢人。"));
-            list.Add(new SettingRow
-            {
-                Label = "疑似骂人关键词",
-                Hint = "逗号分隔，留空禁用匹配。引用也可能误报，避免泛词。",
-                Kind = RowKind.TextField,
-                GetText = () => cfg.ChatAbuseKeywords.Value ?? string.Empty,
-                SetText = value =>
-                {
-                    cfg.ChatAbuseKeywords.Value = value ?? string.Empty;
-                    FlashSaved();
-                },
-            });
+            list.Add(Info("疑似骂人关键词", "要改词表请直接编辑配置文件 apex.cheat.ender.cfg 里的「疑似骂人关键词」。",
+                () => (cfg.ChatAbuseKeywords.Value ?? string.Empty)
+                    .Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries).Length + " 个词"));
             return list;
         }
 
@@ -851,29 +876,69 @@ namespace ApexCheatEnder.UI
             list.Add(Toggle("记录作弊判定", cfg.RecordCheatHistory,
                 "写进 CheatHistory.txt，含昵称和命中的具体规则。万一误判了，这里就是翻案证据。"));
 
-            // 当前命中列表 → 逐人提供「踢出」按钮
+            // 手动踢人：列出房间里**所有人**，不只是命中规则的。
+            // 之前只列命中者，等于「想踢个没被抓到的捣乱分子」做不到。
             var verdicts = AntiCheatRuntime.Verdicts;
-            if (verdicts == null) return list;
+            list.Add(Info("手动踢人", "下面是房间里所有人，房主可以直接踢出。命中过的会标注风险等级。",
+                () => GameBridge.IsHost ? "你是房主" : "你不是房主，只能看"));
 
-            foreach (var v in verdicts.RankedVerdicts())
+            foreach (var player in GameBridge.GetPlayers())
             {
-                if (v.EvaluateLevel() == RiskLevel.Normal) continue;
-                var pid = v.PlayerId;
-                var name = v.Name;
-                var detail = "命中 " + v.EvidenceCount + " 条规则"
-                           + (GameBridge.IsHost ? "" : "，你需要是房主才能踢人。");
+                if (player == null) continue;
+                var pid = GameBridge.GetPlayerId(player);
+                if (pid < 0) continue;
+                if (GameBridge.GetLocalPlayer() != null &&
+                    GameBridge.GetPlayerId(GameBridge.GetLocalPlayer()) == pid) continue;   // 不列自己
 
-                list.Add(Action("踢出 " + name, detail,
+                var name = GameBridge.GetPlayerName(player);
+
+                var level = RiskLevel.Normal;
+                var count = 0;
+                if (verdicts != null)
+                {
+                    foreach (var v in verdicts.RankedVerdicts())
+                    {
+                        if (v.PlayerId != pid) continue;
+                        level = v.EvaluateLevel();
+                        count = v.EvidenceCount;
+                        break;
+                    }
+                }
+
+                var hint = count > 0
+                    ? $"命中 {count} 条规则，风险等级 {level}。"
+                    : "目前没有命中任何规则。";
+                if (!GameBridge.IsHost) hint += "你需要是房主才能踢人。";
+
+                list.Add(Action("踢出 " + name, hint,
                     () =>
                     {
                         if (!GameBridge.IsHost) return;
-                        var clientId = GameBridge.GetClientIdByPlayerId(pid);
-                        if (clientId < 0) return;
+
+                        // 点击时才解析目标，**不能**在构建列表时把 clientId 捕获进闭包。
+                        // 列表打开后玩家进出会重新分配 id / clientId，
+                        // 用旧值会踢到别人头上 —— 这是踢人这种不可逆操作最不能犯的错。
+                        //
+                        // 同时校验玩家号与昵称：任一与构建时对不上就放弃，
+                        // 宁可这次不踢，也不能踢错。
+                        var clientId = -1;
+                        var matched = false;
+                        foreach (var current in GameBridge.GetPlayers())
+                        {
+                            if (current == null) continue;
+                            if (GameBridge.GetPlayerId(current) != pid) continue;
+                            if (GameBridge.GetPlayerName(current) != name) return;   // 号对上了但换人了
+                            matched = true;
+                            clientId = GameBridge.GetClientIdByPlayerId(pid);
+                            break;
+                        }
+                        if (!matched || clientId < 0) return;
+
                         var banned = DispositionModes.ShouldBan(cfg.DispositionMode.Value);
                         if (GameBridge.KickPlayer(clientId, banned))
                             AntiCheatRuntime.Log?.LogWarning("[处置] 已手动踢出「" + name + "」。");
                     },
-                    () => GameBridge.IsHost ? "[ 点击踢出 ]" : "[ 非房主 ]"));
+                    () => GameBridge.IsHost ? "点击踢出" : "需要房主"));
             }
             return list;
         }
@@ -914,79 +979,221 @@ namespace ApexCheatEnder.UI
         }
 
         /// <summary>页「关于」：版本与帮助。</summary>
+        /// <summary>
+        /// 「记录与工具」页。
+        ///
+        /// **主体是「谁被检测了、几次、犯了什么」** —— 这是最该一眼看到的信息。
+        /// 原来这页塞了 18 行「分组映射」之类的配置，把真正要看的东西埋了。
+        /// 现在按「检测汇总 → 历史事件 → 工具 → 分组映射」排，重要程度递减。
+        /// </summary>
         private static List<SettingRow> BuildToolsPage(AntiCheatConfig cfg)
         {
             var list = new List<SettingRow>();
+
+            // ================= 检测汇总 =================
+            var verdicts = AntiCheatRuntime.Verdicts;
+            var flagged = new List<PlayerVerdict>();
+            if (verdicts != null)
+                foreach (var v in verdicts.RankedVerdicts())
+                    if (v.Evidence.Count > 0) flagged.Add(v);
+
+            var totalHits = 0;
+            foreach (var v in flagged) totalHits += v.Evidence.Count;
+
+            list.Add(Info("检测汇总",
+                "本局各玩家命中的规则与次数，按次数从多到少。只统计当前这一局。",
+                () => flagged.Count == 0 ? "暂无命中" : $"{flagged.Count} 人 · {totalHits} 次"));
+
+            if (flagged.Count == 0)
+            {
+                list.Add(Info("本局暂无检测记录",
+                    "有玩家触发规则后会出现在这里，并显示他命中了哪几条、各几次。",
+                    () => "—"));
+            }
+            else
+            {
+                foreach (var verdict in flagged)
+                {
+                    var v = verdict;
+
+                    // 按规则聚合计数：同一条规则命中多次只占一行，后面跟次数
+                    var counts = new Dictionary<ViolationKind, int>();
+                    foreach (var e in v.Evidence)
+                        counts[e.Kind] = counts.TryGetValue(e.Kind, out var c) ? c + 1 : 1;
+
+                    // 最近一条证据的原文 —— 悬停时在底部描述栏显示，就是「犯了什么」
+                    var latest = v.Evidence[v.Evidence.Count - 1].Detail;
+
+                    list.Add(Info(v.Name,
+                        latest,
+                        () => $"{v.EvaluateLevel()} · 共 {v.Evidence.Count} 次"));
+
+                    foreach (var pair in counts)
+                    {
+                        var kind = pair.Key;
+                        list.Add(Info("      " + kind,
+                            RuleHintOf(kind),
+                            () => (counts.TryGetValue(kind, out var c) ? c : 0) + " 次"));
+                    }
+                }
+            }
+
+            // ================= 历史事件 =================
+            list.Add(Info("历史事件",
+                "跨回合累计，最多保留 256 条；用来回看整晚的情况。",
+                () => (verdicts?.History.Count ?? 0) + " 条"));
+
+            var filtered = new List<Violation>();
+            if (verdicts != null)
+                filtered.AddRange(RuleGroups.Filter(verdicts.History, _historyGroup, cfg.RuleGroupMapping.Value));
+
+            var pages = Math.Max(1, (filtered.Count + 7) / 8);
+            _historyPage = Math.Min(_historyPage, pages - 1);
+
+            list.Add(Action("历史分类",
+                "点击切换分类过滤；只影响这里显示的历史，不影响检测。",
+                () =>
+                {
+                    _historyGroup = (_historyGroup + 1) % (RuleGroups.Names.Length + 1);
+                    _historyPage = 0;
+                    BuildRows(_currentPage);
+                },
+                () => _historyGroup == 0 ? "全部" : RuleGroups.Names[_historyGroup - 1]));
+
+            list.Add(Action("历史翻页",
+                "每页八条，点击翻到下一页。",
+                () =>
+                {
+                    _historyPage = (_historyPage + 1) % pages;
+                    BuildRows(_currentPage);
+                },
+                () => $"{_historyPage + 1}/{pages}"));
+
+            for (var i = _historyPage * 8; i < Math.Min(filtered.Count, (_historyPage + 1) * 8); i++)
+            {
+                var item = filtered[i];
+                list.Add(Action($"{item.PlayerName} · {item.Kind}",
+                    item.Detail,
+                    () =>
+                    {
+                        _selectedDetail = item.Detail;
+                        BuildRows(_currentPage);
+                    },
+                    () => "详情"));
+            }
+
+            if (_selectedDetail != null)
+                list.Add(Info("选中详情", _selectedDetail, () => "本地记录"));
+
+            // ================= 工具 =================
             var presets = new[] { "保守", "标准", "严格" };
-            list.Add(Action("规则预设", "切换并应用阈值；自动踢人设置保持原样。", () =>
-            {
-                _preset = (_preset + 1) % presets.Length;
-                cfg.ApplyPreset(_preset);
-                AntiCheatRuntime.ApplyConfigChange();
-                FlashSaved();
-            }, () => presets[_preset]));
-            list.Add(Action("恢复安全默认", "五秒内再次点击确认；保留自动踢人和自定义文本。", () =>
-            {
-                if (!RestoreConfirmation.Confirm(Time.unscaledTime)) return;
-                cfg.RestoreSafeDefaults();
-                AntiCheatRuntime.ApplyConfigChange();
-                FlashSaved();
-            }, () => RestoreConfirmation.Armed(Time.unscaledTime) ? "再次点击确认" : "恢复默认"));
+            list.Add(Action("规则预设",
+                "切换并应用阈值；自动踢人设置保持原样。",
+                () =>
+                {
+                    _preset = (_preset + 1) % presets.Length;
+                    cfg.ApplyPreset(_preset);
+                    AntiCheatRuntime.ApplyConfigChange();
+                    FlashSaved();
+                },
+                () => presets[_preset]));
+
+            list.Add(Action("恢复安全默认",
+                "五秒内再次点击确认；保留自动踢人和自定义文本。",
+                () =>
+                {
+                    if (!RestoreConfirmation.Confirm(Time.unscaledTime)) return;
+                    cfg.RestoreSafeDefaults();
+                    AntiCheatRuntime.ApplyConfigChange();
+                    FlashSaved();
+                },
+                () => RestoreConfirmation.Armed(Time.unscaledTime) ? "再次点击确认" : "恢复默认"));
+
+            list.Add(Action("导出脱敏诊断",
+                "导出内容不含昵称、聊天原文或配置。",
+                () => { _exportStatus = AntiCheatRuntime.ExportDiagnostics(); },
+                () => _exportStatus));
+
+            list.Add(Info("性能",
+                "低频采样，只在本地显示。",
+                () => $"{AntiCheatRuntime.CurrentFps:F0} FPS"));
+
             list.Add(Toggle("重复聊天本地提示", cfg.ShowRepeatedChatNotice,
                 "默认关闭；按发送者计数，10秒冷却，不计作弊、不踢人。"));
             list.Add(Number("重复几次才提示", cfg.RepeatedChatThreshold, 1f, 3f, 10f,
                 "同一发送者10秒内连续发送相同消息的次数。", true));
+
+            // ================= 分组映射（配置，放最后） =================
+            list.Add(Info("规则分组",
+                "给每条规则指定所属分组，只影响上面历史事件的分类过滤。",
+                () => "点击切换"));
+
             foreach (ViolationKind kind in Enum.GetValues(typeof(ViolationKind)))
             {
                 var rule = kind;
-                list.Add(Action("分组 · " + rule, "点击依次切换六组并保存；仅影响历史分类。", () =>
-                {
-                    cfg.RuleGroupMapping.Value = RuleGroups.Cycle(rule, cfg.RuleGroupMapping.Value);
-                    _historyPage = 0;
-                    AntiCheatRuntime.ApplyConfigChange();
-                    FlashSaved();
-                    BuildRows(_currentPage);
-                }, () => RuleGroups.Resolve(rule, cfg.RuleGroupMapping.Value)));
+                list.Add(Action(RuleHintOf(rule) == null ? rule.ToString() : rule.ToString(),
+                    "点击依次切换分组并保存；仅影响历史分类。",
+                    () =>
+                    {
+                        cfg.RuleGroupMapping.Value = RuleGroups.Cycle(rule, cfg.RuleGroupMapping.Value);
+                        _historyPage = 0;
+                        AntiCheatRuntime.ApplyConfigChange();
+                        FlashSaved();
+                        BuildRows(_currentPage);
+                    },
+                    () => RuleGroups.Resolve(rule, cfg.RuleGroupMapping.Value)));
             }
-            list.Add(Info("性能", "低频采样，只在本地显示。", () => $"{AntiCheatRuntime.CurrentFps:F0} FPS"));
-            list.Add(Action("导出脱敏诊断", "不包含昵称、聊天原文或配置。", () =>
-            {
-                _exportStatus = AntiCheatRuntime.ExportDiagnostics();
-            }, () => _exportStatus));
-            list.Add(Action("历史分类", "使用本地规则分组映射过滤。", () =>
-            {
-                _historyGroup = (_historyGroup + 1) % (RuleGroups.Names.Length + 1);
-                _historyPage = 0;
-                BuildRows(_currentPage);
-            }, () => _historyGroup == 0 ? "全部" : RuleGroups.Names[_historyGroup - 1]));
-            var filtered = new List<Violation>();
-            if (AntiCheatRuntime.Verdicts != null)
-                filtered.AddRange(RuleGroups.Filter(AntiCheatRuntime.Verdicts.History, _historyGroup, cfg.RuleGroupMapping.Value));
-            var pages = Math.Max(1, (filtered.Count + 7) / 8);
-            _historyPage = Math.Min(_historyPage, pages - 1);
-            list.Add(Action("历史分页", "每页八条，最多保留256条事件。", () =>
-            {
-                _historyPage = (_historyPage + 1) % pages;
-                BuildRows(_currentPage);
-            }, () => $"{_historyPage + 1}/{pages} · {filtered.Count}条"));
-            for (var i = _historyPage * 8; i < Math.Min(filtered.Count, (_historyPage + 1) * 8); i++)
-            {
-                var item = filtered[i];
-                list.Add(Action($"玩家 {item.PlayerId} · {item.Kind}", item.Severity.ToString(), () =>
-                {
-                    _selectedDetail = item.Detail;
-                    BuildRows(_currentPage);
-                }, () => "查看详情"));
-            }
-            list.Add(Info("命中详情", _selectedDetail ?? "点击历史条目查看依据。", () => "本地记录"));
-            if (AntiCheatRuntime.Verdicts != null)
-                foreach (var verdict in AntiCheatRuntime.Verdicts.RankedVerdicts())
-                {
-                    if (verdict.EvaluateLevel() == RiskLevel.Normal) continue;
-                    var v = verdict;
-                    list.Add(Info($"玩家 {v.PlayerId} 风险", "仅本地显示，不修改网络名字。", () => v.EvaluateLevel().ToString()));
-                }
+
             return list;
+        }
+
+        /// <summary>规则的中文说明；用于悬停时解释「这条规则管的是什么」。</summary>
+        private static string RuleHintOf(ViolationKind kind)
+        {
+            switch (kind)
+            {
+                // 静态层
+                case ViolationKind.KnownCheatPlugin: return "命中了已知作弊插件的特征。";
+                case ViolationKind.UnknownPlugin: return "加载了不在白名单内的可疑插件。";
+                case ViolationKind.MemoryTamper: return "检测到内存注入或方法被改写的痕迹。";
+                // 运动层
+                case ViolationKind.Teleport: return "单次位移大到不可能由正常移动产生。";
+                case ViolationKind.SpeedHack: return "移动速度持续超过本局设置的上限。";
+                case ViolationKind.WallClip: return "运动轨迹穿过了墙体。";
+                // 事件层
+                case ViolationKind.KillTooFar: return "击杀距离超过设置允许的最大距离。";
+                case ViolationKind.KillCooldownBypass: return "两次击杀的间隔短于角色冷却时间。";
+                case ViolationKind.KillWhileNotImpostor: return "非内鬼身份执行了击杀。";
+                case ViolationKind.TaskTooFast: return "两次任务间隔短于物理上可能的最短时间。";
+                case ViolationKind.RemoteTask: return "在离任务点很远的位置提交了任务。";
+                case ViolationKind.IllegalVent: return "不具备能力或距离过远时使用了通风管。";
+                case ViolationKind.GhostAction: return "已死亡的玩家仍执行了活人动作。";
+                // 会议层
+                case ViolationKind.MoveDuringMeeting: return "会议期间仍在移动（连续采样确认）。";
+                case ViolationKind.IllegalMeetingAction: return "会议期间的投票或报告行为异常。";
+                case ViolationKind.EarlyMeeting: return "开局保护期内发起会议或报告尸体。";
+                // 破坏层
+                case ViolationKind.SabotageWhileNotImpostor: return "非内鬼阵营触发了破坏系统。";
+                case ViolationKind.SabotageDuringMeeting: return "会议期间触发了破坏系统。";
+                case ViolationKind.InvalidSabotageTarget: return "破坏目标越界，疑似改包。";
+                // 通讯层
+                case ViolationKind.ChatFlood: return "聊天发送频率异常（刷屏）。";
+                case ViolationKind.IllegalChat: return "聊天内容非法（空、超长或含控制字符）。";
+                case ViolationKind.IllegalName: return "昵称非法（空、超长或含控制字符）。";
+                // 角色动作层
+                case ViolationKind.IllegalShapeshift: return "不具备变形能力的角色执行了变形。";
+                case ViolationKind.IllegalProtect: return "不具备保护能力的角色执行了保护。";
+                // 通风管 / 滑索
+                case ViolationKind.VentForgedId: return "使用了不存在的通风管编号。";
+                case ViolationKind.VentDuringMeeting: return "会议期间使用了通风管。";
+                case ViolationKind.VentForceOther: return "非房主强制把他人踢出通风管。";
+                case ViolationKind.ZiplineAbuse: return "滑索使用时机非法或坐标越界。";
+                // 网络层
+                case ViolationKind.InvalidRpc: return "收到参数非法的 RPC 调用。";
+                case ViolationKind.StateDesync: return "上报状态与权威状态长期不一致。";
+                case ViolationKind.OversizedPacket: return "收到异常大的数据包。";
+                default: return null;
+            }
         }
 
         private static List<SettingRow> BuildAboutPage()
@@ -1144,27 +1351,14 @@ namespace ApexCheatEnder.UI
             if (!_visible) return;
 
             ClampWindow();
+            // 缩放手柄优先级最高：它压在窗口右下角，不能被拖动或点击抢走。
+            if (HandleResize()) return;
             if (HandleWindowDrag()) return;
 
-            // 输入控件先吃事件，避免点键盘时顺带把别的开关点了
-            var inputCaptured = false;
-            foreach (var input in TextInputs)
+            if (!HandleSlider())
             {
-                input.Tick();
-                inputCaptured |= input.CapturesMouse;
-            }
-
-            if (!inputCaptured)
-            {
-                if (!HandleSlider())
-                {
-                    HandleClick();
-                    HandleScroll();
-                }
-            }
-            else
-            {
-                _pressArmed = _scrollDragging = false;
+                HandleClick();
+                HandleScroll();
             }
 
             ApplyScroll();
@@ -1188,6 +1382,94 @@ namespace ApexCheatEnder.UI
             var y = Mathf.Max(0f, (Screen.height - WindowHeight * scale) / 2f);
             var p = _windowRect.anchoredPosition;
             _windowRect.anchoredPosition = new Vector2(Mathf.Clamp(p.x, -x, x), Mathf.Clamp(p.y, -y, y));
+        }
+
+        /// <summary>
+        /// 右下角手柄拖拽缩放。
+        ///
+        /// 拖拽过程中每 120 毫秒重建一次布局，松手时再重建一次并写回配置。
+        /// 为什么不在每一帧重建：重建会销毁并重新创建整窗的 GameObject，
+        /// 每帧做一次等于每秒造几千个对象，纯浪费。
+        /// </summary>
+        private static bool HandleResize()
+        {
+            var mouse = Input.mousePosition;
+
+            if (Input.GetMouseButtonDown(0) && _resizeGrip != null &&
+                RectTransformUtility.RectangleContainsScreenPoint(_resizeGrip, mouse, null))
+            {
+                _windowResizing = true;
+                _pressArmed = _scrollDragging = false;
+                _scrollVelocity = 0f;
+                _resizeStartMouse = new Vector2(mouse.x, mouse.y);
+                _resizeStartWidth = WindowWidth;
+                _resizeStartHeight = WindowHeight;
+            }
+
+            if (!_windowResizing) return false;
+
+            // 鼠标位移要换算回「未缩放前的窗口单位」，否则窗口被自动缩小时手感会飘。
+            var scale = Mathf.Max(0.01f, _windowRect.localScale.x);
+            var delta = new Vector2(mouse.x, mouse.y) - _resizeStartMouse;
+            WindowWidth = Mathf.Clamp(_resizeStartWidth + delta.x / scale, MinWindowWidth, MaxWindowWidth);
+            WindowHeight = Mathf.Clamp(_resizeStartHeight + delta.y / scale, MinWindowHeight, MaxWindowHeight);
+
+            var now = Time.unscaledTime;
+            if (now >= _nextLiveRelayout)
+            {
+                _nextLiveRelayout = now + 0.12f;
+                Relayout();
+            }
+
+            if (Input.GetMouseButtonUp(0) || !Input.GetMouseButton(0))
+            {
+                _windowResizing = false;
+                Relayout();
+                PersistWindowSize();
+            }
+
+            return true;
+        }
+
+        /// <summary>把当前尺寸写回配置，下次启动沿用。</summary>
+        private static void PersistWindowSize()
+        {
+            var cfg = AntiCheatRuntime.Config;
+            if (cfg == null) return;
+
+            var w = Mathf.RoundToInt(WindowWidth);
+            var h = Mathf.RoundToInt(WindowHeight);
+            if (cfg.SettingsWindowWidth.Value == w && cfg.SettingsWindowHeight.Value == h) return;
+
+            cfg.SettingsWindowWidth.Value = w;
+            cfg.SettingsWindowHeight.Value = h;
+            FlashSaved();
+            AntiCheatRuntime.ApplyConfigChange();
+        }
+
+        /// <summary>
+        /// 按当前 WindowWidth / WindowHeight 重建整窗。
+        ///
+        /// 骨架和每一行的位置都是在构建时按尺寸算好的，改尺寸只能整窗重建 ——
+        /// 这也是拖拽时要做节流的原因。
+        /// </summary>
+        private static void Relayout()
+        {
+            if (_canvasRoot == null) return;
+
+            var page = _currentPage;
+            var wasVisible = _visible;
+
+            if (_root != null) UnityEngine.Object.Destroy(_root);
+            _root = null;
+            _resizeGrip = null;
+            _built = false;
+            Rows.Clear();
+            Tabs.Clear();
+
+            EnsureBuilt(_canvasRoot);
+            if (page > 0) SwitchPage(page);
+            if (_root != null) _root.SetActive(wasVisible);
         }
 
         private static bool HandleWindowDrag()
@@ -1369,13 +1651,8 @@ namespace ApexCheatEnder.UI
             }
             if (MouseOverViewport(mouse))
             {
-                foreach (var header in CardHeaders)
-                {
-                    if (!RectTransformUtility.RectangleContainsScreenPoint(header.Rect, mouse, null) ||
-                        !RectTransformUtility.RectangleContainsScreenPoint(header.Rect, _pressPos, null)) continue;
-                    header.Model.OnToggle();
-                    return;
-                }
+                // 分组不再可折叠，这里只需在悬停时把该行说明显示到底部描述栏。
+                UpdateHoverHint(mouse);
             }
 
             // 行命中必须先确认鼠标在视口内 —— 被裁剪掉（滚出视口）的行，

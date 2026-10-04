@@ -10,6 +10,12 @@ namespace ApexCheatEnder.Core
         public GameVec2 Position;
         public bool IsDead;
         public bool InVent;
+
+        /// <summary>
+        /// 处于管道 / 梯子 / 移动平台等会产生合法大位移的状态。
+        /// 这些状态下位移远超正常走路速度，必须豁免瞬移与超速判定。
+        /// </summary>
+        public bool InSpecialMovement;
         public bool IsImpostor;
 
         /// <summary>角色是否被允许使用通风管（Role.CanVent）。Viper 为 true。</summary>
@@ -134,6 +140,21 @@ namespace ApexCheatEnder.Core
         public bool IsInLegalTeleportWindow(float now, float window = 0.35f) =>
             now - LastLegalTeleportTime <= window;
 
+        /// <summary>
+        /// 会议期间「连续」超容差移动的采样次数。
+        ///
+        /// 单次大位移不能判定 —— 入会时全员会被传送到会议桌，那是一次性尖峰。
+        /// 要求连续两次以上，才能真正区分「传送」和「一直在动」。
+        /// </summary>
+        public int ConsecutiveMeetingMoveStrikes { get; set; }
+
+        /// <summary>
+        /// 连续处于墙体内部的采样次数。
+        ///
+        /// 单次采样可能是擦着桌子/控制台边缘的误判；真的穿墙会持续待在里面。
+        /// </summary>
+        public int ConsecutiveWallStrikes { get; set; }
+
         /// <summary>回合切换时清空所有回合级状态，但保留累计统计。</summary>
         public void ResetForNewRound(float now)
         {
@@ -144,6 +165,8 @@ namespace ApexCheatEnder.Core
             LastKillTime = float.NegativeInfinity;
             LastTaskTime = float.NegativeInfinity;
             LastLegalTeleportTime = float.NegativeInfinity;
+            ConsecutiveMeetingMoveStrikes = 0;
+            ConsecutiveWallStrikes = 0;
             LastChatReportTime = float.NegativeInfinity;
             LastActionReportTime = float.NegativeInfinity;
             ChatTimes.Clear();

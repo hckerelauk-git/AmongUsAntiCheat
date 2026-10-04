@@ -13,7 +13,32 @@ namespace ApexCheatEnder.Core
         /// <summary>ACE 用户标记。</summary>
         public const string AceDefault = "😱ACE用户😱";
 
-        /// <summary>Amethyst 用户标记。</summary>
-        public const string AmethystDefault = "💜AME用户💜";
+        /// <summary>
+        /// Amethyst 用户标记。
+        ///
+        /// 用粉心 💗 而不是原来的紫心 💜 —— 与 Amethyst 客户端自己的用户标识观感一致，
+        /// 用户第一眼就认得出来。
+        /// </summary>
+        public const string AmethystDefault = "💗AME用户💗";
+
+        /// <summary>
+        /// Amethyst 用户名字的粉色（TMP 富文本用的十六进制，不带 #）。
+        ///
+        /// 用富文本给整段名字上色，而不是改 <c>TextMeshPro.color</c>：
+        /// 名字颜色由游戏每帧自己写，改 Graphic 的颜色会被立刻覆盖、导致闪烁；
+        /// 富文本是文本内容的一部分，游戏重写文本时才需要重刷，不会闪。
+        /// </summary>
+        public const string AmethystNameHex = "FF8FD0";
+
+        /// <summary>没装任何模组的玩家标记。</summary>
+        public const string VanillaDefault = "原本玩家";
+
+        /// <summary>
+        /// 旧版的 Amethyst 标记（紫心）。
+        ///
+        /// BepInEx 会把默认值写进 cfg 文件，之后**改默认值对已有配置无效** ——
+        /// 用户配置里存的是这一串。用它做一次性迁移判断，见 AntiCheatConfig。
+        /// </summary>
+        public const string LegacyAmethystTag = "💜AME用户💜";
     }
 }
