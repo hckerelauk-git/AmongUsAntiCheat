@@ -245,6 +245,35 @@ namespace ApexCheatEnder
             return false;
         }
 
+        /// <summary>
+        /// 读取玩家「能否使用击杀按钮」的角色能力。
+        ///
+        /// 这是接收端拦截「船员发起击杀」的关键前置条件：只有**确定拿到角色**
+        /// （返回 true）时才允许据此拦截；拿不到角色信息一律返回 false 表示「未知」，
+        /// 由调用方放行 —— 宁可漏拦，也不能因为角色还没同步就砍掉内鬼的正常击杀。
+        /// </summary>
+        /// <param name="player">目标玩家。</param>
+        /// <param name="canKill">角色能力；仅在返回 true 时有效。</param>
+        /// <returns>是否成功取到角色能力（false = 角色信息不可用）。</returns>
+        public static bool TryGetCanKill(PlayerControl player, out bool canKill)
+        {
+            canKill = true;
+            if (player == null) return false;
+
+            try
+            {
+                var role = player.Data?.Role;
+                if (role != null)
+                {
+                    canKill = role.CanUseKillButton;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
         /// <summary>玩家当前能否移动。</summary>
         public static bool CanMove(PlayerControl player)
         {

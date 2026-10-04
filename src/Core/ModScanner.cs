@@ -144,6 +144,17 @@ namespace ApexCheatEnder.Core
         {
             var display = plugin.ToString();
 
+            // ---------- 第零优先：本插件自身 ----------
+            // 必须排在最前面，且必须按「程序集路径」判断。
+            // 原因：作弊签名表（类型名、字符串标记）是编译进本 DLL 的，
+            // 下面的深度匹配会在自己的 DLL 里搜到这些标记，把 ACE 自己判成
+            // AUM 之类的作弊软件。好友房主现场日志里确实出现了这种自我命中。
+            if (IsSelf(plugin))
+            {
+                report.TrustedPlugins.Add($"{display}（本插件自身）");
+                return;
+            }
+
             // ---------- 第一优先：用户显式白名单 ----------
             if (MatchesAny(plugin.Guid, trustedGuids) ||
                 MatchesAny(plugin.Name, trustedNames) ||
@@ -163,10 +174,12 @@ namespace ApexCheatEnder.Core
             }
 
             // ---------- 黑名单匹配 ----------
-            var hit = MatchBlacklist(plugin);
+            var hit = MatchBlacklist(plugin, out var source);
             if (hit != null)
             {
-                report.Violations.Add(BuildViolation(plugin, hit, "元数据匹配"));
+                // 命中来源必须如实写进证据：现场日志把文件深度匹配也标成
+                // 「元数据匹配」，导致无法判断到底是名字撞了还是 DLL 里有真标记。
+                report.Violations.Add(BuildViolation(plugin, hit, source));
                 return;
             }
 
@@ -192,28 +205,71 @@ namespace ApexCheatEnder.Core
                 _log.LogInfo($"[静态扫描] 未收录插件：{display}");
         }
 
-        private CheatSignature MatchBlacklist(LoadedPluginInfo plugin)
+        /// <summary>
+        /// 判断某个已加载插件是不是本插件自己。
+        ///
+        /// 先比 GUID，再比程序集全路径。路径比较是真正兜底的那一条：
+        /// GUID 理论上唯一，但插件表里偶尔拿不到元数据，此时只能靠文件路径认亲。
+        /// </summary>
+        private static bool IsSelf(LoadedPluginInfo plugin)
+        {
+            if (plugin == null) return false;
+
+            if (string.Equals(plugin.Guid, AntiCheatPlugin.PluginGuid, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(plugin.Name, AntiCheatPlugin.PluginName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            try
+            {
+                var self = typeof(ModScanner).Assembly.Location;
+                if (string.IsNullOrEmpty(self) || string.IsNullOrEmpty(plugin.Location)) return false;
+                return string.Equals(Path.GetFullPath(self), Path.GetFullPath(plugin.Location),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private CheatSignature MatchBlacklist(LoadedPluginInfo plugin, out string source)
         {
             foreach (var sig in CheatSignatureDb.Blacklist)
             {
                 // 1) GUID 精确匹配
                 if (MatchesAnyExact(plugin.Guid, sig.Guids))
+                {
+                    source = "GUID 精确匹配";
                     return sig;
+                }
 
                 // 2) 插件名 / 程序集名片段
                 if (MatchesAny(plugin.Name, sig.NameMarkers) ||
                     MatchesAny(plugin.Location, sig.NameMarkers) ||
                     MatchesAny(plugin.Guid, sig.Guids))
+                {
+                    source = "插件名/程序集名匹配";
                     return sig;
+                }
 
                 // 3) 需要读文件才能做的深度匹配
                 if (!string.IsNullOrEmpty(plugin.Location) && File.Exists(plugin.Location))
                 {
-                    if (FileContainsAny(plugin.Location, sig.TypeMarkers) ||
-                        FileContainsAny(plugin.Location, sig.StringMarkers))
+                    if (FileContainsAny(plugin.Location, sig.TypeMarkers))
+                    {
+                        source = "DLL 类型标记匹配";
                         return sig;
+                    }
+
+                    if (FileContainsAny(plugin.Location, sig.StringMarkers))
+                    {
+                        source = "DLL 字符串标记匹配";
+                        return sig;
+                    }
                 }
             }
+
+            source = null;
             return null;
         }
 

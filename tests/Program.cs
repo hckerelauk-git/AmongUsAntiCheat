@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ApexCheatEnder.Core;
 
 namespace ApexCheatEnder.Tests
@@ -58,6 +59,9 @@ namespace ApexCheatEnder.Tests
                 Run("背景：实际 DLL 资源名称与图片字节", () => TestMenuArtResources(args[0], args[1]));
             Run("背景：自动内置与菜单入口源码约束", TestAutomaticMenuArt);
             Run("背景：等比居中裁切", TestMenuArtCrop);
+            Run("拦截：接收端 RPC 守卫源码约束", TestRpcGuardSource);
+            Run("任务：坐标不可信时不做绝对距离定罪", TestTaskPositionTrust);
+            Run("扫描：不得把本插件判成作弊", TestScannerSelfExclusion);
             Run("GameVec2：距离与向量运算", TestGameVec2);
             Run("PlayerTrack：快照位移/时间差计算", TestPlayerTrackDelta);
             Run("PlayerTrack：合法传送豁免窗口", TestLegalTeleportWindow);
@@ -284,6 +288,106 @@ namespace ApexCheatEnder.Tests
             True(names.SetEquals(expected), "三张候选图及旧兜底图应以明确名称嵌入 DLL");
         }
 
+        /// <summary>
+        /// 接收端拦截层的关键不变量。
+        ///
+        /// 这层直接依赖 Unity / IL2CPP，没法在纯逻辑测试里跑真实 RPC，
+        /// 所以用源码约束守住三条「一旦破坏就是事故」的规则：
+        /// 拿不到角色必须放行、只在房主生效、优先级必须低于 RpcContext。
+        /// </summary>
+        private static void TestRpcGuardSource()
+        {
+            var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
+            var guard = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "Patches/RpcGuardPatches.cs"));
+
+            // 1. 必须用三态查询：拿不到角色信息时 TryGet* 返回 false，此时一律放行。
+            //    若改成直接读 role.CanUseKillButton，角色未同步就会把内鬼的正常击杀砍掉。
+            True(guard.Contains("TryGetCanKill") && guard.Contains("TryGetCanVent"),
+                "必须用三态角色查询，禁止直接读角色字段");
+            True(!guard.Contains("role.CanUseKillButton") && !guard.Contains("role.CanVent"),
+                "不得绕过三态查询直接访问角色能力");
+
+            // 2. 只在房主生效：非房主拦了只会造成各端表现不一致。
+            True(guard.Contains("GameBridge.IsHost"), "拦截必须限定房主");
+
+            // 3. 优先级必须低于 RpcContextPatch：Harmony 跳过后续 Prefix 时仍会执行
+            //    所有 Postfix，若本 Prefix 抢在 Push 之前返回 false，就会把外层栈帧弹掉。
+            True(guard.Contains("HarmonyPriority(Priority.Low)"), "优先级必须低于 RpcContext，保证 Push/Pop 配对");
+
+            // 4. 只拦语义确定的两个 RPC，别的走 default 放行。
+            True(guard.Contains("RpcCalls.MurderPlayer") && guard.Contains("RpcCalls.EnterVent"),
+                "只拦角色明确不允许的击杀与钻管道");
+
+            // 5. 默认必须放行：Prefix 的 catch 之后必须 return true。
+            var prefixStart = guard.IndexOf("private static bool Prefix", StringComparison.Ordinal);
+            var prefixEnd = guard.IndexOf("private static bool BlockImpossibleKill", StringComparison.Ordinal);
+            True(prefixStart >= 0 && prefixEnd > prefixStart, "应能定位 Prefix 方法体");
+            var prefix = guard.Substring(prefixStart, prefixEnd - prefixStart);
+            var catchAt = prefix.LastIndexOf("catch", StringComparison.Ordinal);
+            True(catchAt >= 0 && prefix.Substring(catchAt).Contains("return true;"),
+                "Prefix 捕获异常后必须放行，不能拦错");
+        }
+
+        /// <summary>
+        /// 任务点坐标不可信时，绝对距离判定必须停用。
+        ///
+        /// 好友现场日志：14 次「远程任务」命中的距离全部是同一个 5.82 ——
+        /// 说明拿到的是 PlayerTask.transform.position（任务对象自身位置），
+        /// 而不是玩家真正要站的任务交互点。用它做绝对距离判定必然误报。
+        ///
+        /// 相对位移判定（任务速度）比较同一玩家前后两次任务点，固定偏移相减时抵消，
+        /// 因此必须保留 —— 这条测试同时守住「别一刀切把任务检测全删了」。
+        /// </summary>
+        private static void TestTaskPositionTrust()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                "ace-task-trust-" + Guid.NewGuid().ToString("N") + ".cfg");
+            var cfg = new ApexCheatEnder.Config.AntiCheatConfig(new BepInEx.Configuration.ConfigFile(path, false));
+            var analyzer = new BehaviorAnalyzer(cfg, null);
+            var track = new PlayerTrack(1, "测试玩家", 1f);
+
+            var task = new GameVec2(100f, 100f);   // 远超容差
+            track.Push(new PlayerSnapshot { Time = 1f, Position = new GameVec2(0f, 0f) });
+
+            // --- 位置不可信：不得产出远程任务证据 ---
+            var untrusted = new List<Violation>();
+            analyzer.AnalyzeTask(track, task, 1f, 4f, untrusted, absolutePositionTrusted: false);
+            True(!untrusted.Exists(v => v.Kind == ViolationKind.RemoteTask),
+                "任务点坐标不可信时不得产出远程任务误报");
+
+            // --- 位置可信：同样的距离必须产出证据 ---
+            var trusted = new List<Violation>();
+            analyzer.AnalyzeTask(track, task, 1f, 4f, trusted, absolutePositionTrusted: true);
+            True(trusted.Exists(v => v.Kind == ViolationKind.RemoteTask),
+                "任务点坐标可信时必须保留远程任务判定");
+        }
+
+        /// <summary>
+        /// 静态扫描不得把自己判成作弊。
+        ///
+        /// 好友现场日志：ACE 在两个回合里被自己的扫描器判成 AUM。
+        /// 根因是作弊签名表（类型名 / 字符串标记）编译在本 DLL 内，
+        /// 深度匹配会在自己的文件里搜到这些标记。
+        /// </summary>
+        private static void TestScannerSelfExclusion()
+        {
+            var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
+            var scanner = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "Core/ModScanner.cs"));
+
+            True(scanner.Contains("IsSelf("), "静态扫描必须显式排除本插件自身");
+            True(scanner.Contains("AntiCheatPlugin.PluginGuid"), "自身判定必须比 GUID");
+            True(scanner.Contains("Assembly.Location"), "自身判定必须有程序集路径兜底");
+
+            // 自身排除必须发生在黑名单匹配之前，否则深度匹配已经先把自己判了。
+            var selfAt = scanner.IndexOf("if (IsSelf(plugin))", StringComparison.Ordinal);
+            var blacklistAt = scanner.IndexOf("MatchBlacklist(plugin", StringComparison.Ordinal);
+            True(selfAt >= 0 && blacklistAt > selfAt, "自身排除必须先于黑名单匹配");
+
+            // 命中来源要如实记录，不能再把文件深度匹配写成「元数据匹配」。
+            True(scanner.Contains("out var source") && scanner.Contains("DLL 类型标记匹配"),
+                "黑名单命中来源必须区分元数据与 DLL 深度匹配");
+        }
+
         private static void TestAutomaticMenuArt()
         {
             var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
@@ -291,9 +395,32 @@ namespace ApexCheatEnder.Tests
             foreach (var forbidden in new[] { "ShowMainMenuArt", "MainMenuArtUrl", "DownloadAsync", "Task.Run", "ChangeBackground" })
                 True(!art.Contains(forbidden), "自动背景不得依赖旧配置、联网或手动切换：" + forbidden);
             True(art.Contains("static readonly int SelectedBackground"), "启动选择必须固定");
-            True(art.Contains("SceneManager.GetActiveScene().handle"), "必须检查当前菜单场景");
-            True(!art.Contains("new GameObject") && !art.Contains("sortingOrder ="), "无安全后景证据时不得创建覆盖层或改变排序");
-            True(art.Contains("renderer.name == \"Background\""), "仅替换明确 Background");
+
+            // 现场日志证明：遍历场景根对象 + 泛型组件查询在好友那版 IL2CPP 上
+            // 会抛 "Method unstripping failed"（133 次），且一次都没命中背景。
+            // 这几条断言锁死「不许再走回那条路」。
+            // 只检查真实代码：注释里会引用旧实现的 API 名字来解释为什么废弃它。
+            var artCode = string.Join("\n", art
+                .Split('\n')
+                .Where(line => !line.TrimStart().StartsWith("//")));
+
+            foreach (var forbidden in new[]
+                     {
+                         "GetRootGameObjects", "GetComponentsInChildren", "GetComponent<SpriteRenderer>",
+                         "FindBackgroundRenderer",
+                     })
+                True(!artCode.Contains(forbidden), "不得再遍历场景查找原背景：" + forbidden);
+
+            // 新方案：自建独立后景，不替换任何游戏原有对象。
+            True(art.Contains("new GameObject(") && art.Contains("AddComponent<SpriteRenderer>()"),
+                "应自建独立 SpriteRenderer 后景");
+            True(art.Contains("sortingOrder = BackdropSortingOrder"), "后景必须固定到最低排序，不能盖住菜单精灵");
+            True(art.Contains("camera.cullingMask"), "后景层必须落在相机确实渲染的层上");
+
+            // 反复重试刷 133 条同样的错误，本身就是缺陷；必须有熔断。
+            True(art.Contains("MaxFailures") && art.Contains("_gaveUp"), "背景失败必须有熔断，不能无限重试");
+            True(art.Contains("ex.StackTrace"), "背景失败必须记录调用栈，只有 Message 定位不到原因");
+
             var settings = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "UI/SettingsWindow.cs"));
             foreach (var forbidden in new[] { "ShowMainMenuArt", "MainMenuArtUrl", "ChangeBackground", "换一张" })
                 True(!settings.Contains(forbidden), "设置中不得保留背景入口");

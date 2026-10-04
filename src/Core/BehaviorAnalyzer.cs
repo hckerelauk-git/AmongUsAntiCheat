@@ -332,32 +332,58 @@ namespace ApexCheatEnder.Core
         /// <param name="now">当前时间。</param>
         /// <param name="maxAllowedSpeed">当前对局允许的最大移动速度。</param>
         /// <param name="output">证据收集器。</param>
+        /// <summary>
+        /// 任务相关判定。
+        /// </summary>
+        /// <param name="track">玩家轨迹。</param>
+        /// <param name="taskPosition">任务点坐标。</param>
+        /// <param name="now">当前时间。</param>
+        /// <param name="maxAllowedSpeed">允许的最大移动速度。</param>
+        /// <param name="output">证据输出。</param>
+        /// <param name="absolutePositionTrusted">
+        /// <paramref name="taskPosition"/> 是否可信到能做「绝对距离」判定。
+        ///
+        /// 目前游戏只给得到 <c>PlayerTask.transform.position</c>，而好友房主现场日志
+        /// 证明它**不是任务交互点**：14 次远程任务命中的距离全部是同一个 5.82，
+        /// 说明拿到的是任务对象自身的位置（还可能是多阶段任务的最后一步）。
+        ///
+        /// 因此这里做一个原则性区分：
+        ///   - **绝对距离**（远程任务）会被固定偏移污染 → 位置不可信时一律不判定
+        ///   - **相对位移**（任务速度）比较的是同一玩家前后两次任务点，
+        ///     固定偏移在相减时自然抵消 → 位置不可信也能照常判定
+        /// </param>
         public void AnalyzeTask(
             PlayerTrack track,
             GameVec2 taskPosition,
             float now,
             float maxAllowedSpeed,
-            List<Violation> output)
+            List<Violation> output,
+            bool absolutePositionTrusted = false)
         {
             if (track == null) return;
 
             // ---------- 远程任务：提交时人不在任务点附近 ----------
-            var distanceToTask = GameVec2.Distance(track.Current.Position, taskPosition);
-            if (distanceToTask > _cfg.RemoteTaskTolerance.Value)
+            // 仅在任务点坐标可信时才判。拿不到可信坐标就不定罪 ——
+            // 现场那 14 条 5.82 全部来自不可信的 transform.position。
+            if (absolutePositionTrusted)
             {
-                output.Add(new Violation(
-                    ViolationKind.RemoteTask,
-                    Severity.High,
-                    track.PlayerId,
-                    track.Name,
-                    now,
-                    $"远程提交任务：玩家位于 {track.Current.Position}，任务点位于 {taskPosition}，相距 {distanceToTask:F2} 单位。",
-                    new Dictionary<string, float>
-                    {
-                        ["distance_to_task"] = distanceToTask,
-                        ["tolerance"] = _cfg.RemoteTaskTolerance.Value,
-                    }));
-                track.FlaggedThisRound = true;
+                var distanceToTask = GameVec2.Distance(track.Current.Position, taskPosition);
+                if (distanceToTask > _cfg.RemoteTaskTolerance.Value)
+                {
+                    output.Add(new Violation(
+                        ViolationKind.RemoteTask,
+                        Severity.High,
+                        track.PlayerId,
+                        track.Name,
+                        now,
+                        $"远程提交任务：玩家位于 {track.Current.Position}，任务点位于 {taskPosition}，相距 {distanceToTask:F2} 单位。",
+                        new Dictionary<string, float>
+                        {
+                            ["distance_to_task"] = distanceToTask,
+                            ["tolerance"] = _cfg.RemoteTaskTolerance.Value,
+                        }));
+                    track.FlaggedThisRound = true;
+                }
             }
 
             // ---------- 任务速度：两次任务点之间的移动速度超过物理上限 ----------

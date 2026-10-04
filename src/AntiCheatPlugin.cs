@@ -24,7 +24,7 @@ namespace ApexCheatEnder
     {
         public const string PluginGuid = "apex.cheat.ender";
         public const string PluginName = "ApexCheatEnder";
-        public const string PluginVersion = "1.1.2";
+        public const string PluginVersion = "1.1.3";
 
         /// <summary>供补丁层写日志的全局入口。</summary>
         internal static ManualLogSource LogSource;
@@ -109,6 +109,10 @@ namespace ApexCheatEnder
             // RPC 洪水防护：唯一的 Prefix 补丁——它是唯一能在 RPC 执行前
             // 把包丢掉的一层，之前因为 TryPatch 只认 Postfix 而从未被挂载。
             TryPatch(typeof(RpcFloodPatches), "RPC 洪水防护");
+
+            // 接收端拦截：对「角色明确不允许」的击杀 / 钻管道直接丢包。
+            // 这是唯一能让作弊动作在本机不生效的一层；其余动作补丁都是事后观察。
+            TryPatch(typeof(RpcGuardPatch), "接收端拦截");
 
             // ACE 客户端互认：认出房间里同样装了本插件的人，并在其名字上加标记
             TryPatch(typeof(AcePresenceRpcPatch), "ACE 互认(握手)");

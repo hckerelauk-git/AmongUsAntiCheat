@@ -433,6 +433,8 @@ namespace ApexCheatEnder
 
             Tracker.Clear();
             Verdicts.ResetForNewRound();
+            // 拦截层的限频表按玩家 id 累积，新回合必须清掉，否则跨局会残留。
+            Patches.RpcGuardPatch.ResetLogState();
             GameBridge.InvalidateLayerCache();
 
             Log?.LogInfo("[反作弊] 检测到进入对局，已重置检测状态。");

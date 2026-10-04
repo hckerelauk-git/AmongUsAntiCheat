@@ -169,7 +169,13 @@ namespace ApexCheatEnder.Patches
                              * AntiCheatRuntime.Config.MaxSpeedTolerance.Value;
 
                 var buffer = new List<Violation>(4);
-                AntiCheatRuntime.Analyzer.AnalyzeTask(track, taskPosition, Time.time, maxSpeed, buffer);
+
+                // absolutePositionTrusted 传 false：游戏只给得到 PlayerTask.transform.position，
+                // 现场日志证明它不是任务交互点（14 次命中距离全是同一个 5.82）。
+                // 传 false 后只保留「任务速度」这类相对位移判定 —— 固定偏移在相减时抵消，
+                // 而「远程任务」这类绝对距离判定不再产出误报。
+                AntiCheatRuntime.Analyzer.AnalyzeTask(track, taskPosition, Time.time, maxSpeed, buffer,
+                    absolutePositionTrusted: false);
 
                 foreach (var v in buffer) AntiCheatRuntime.Submit(v);
 
