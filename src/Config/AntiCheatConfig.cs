@@ -114,6 +114,15 @@ namespace ApexCheatEnder.Config
         /// <summary>标记文案（显示在对方名字后面）。</summary>
         public readonly ConfigEntry<string> AcePresenceTag;
 
+        /// <summary>是否识别并标记装了 Amethyst 的玩家（只旁听，不发送）。</summary>
+        public readonly ConfigEntry<bool> AmethystPresenceEnabled;
+
+        /// <summary>Amethyst 用户的名字标记文案。</summary>
+        public readonly ConfigEntry<string> AmethystPresenceTag;
+
+        /// <summary>左上角是否显示帧率 / 延迟 / 房主状态条。</summary>
+        public readonly ConfigEntry<bool> ShowStatsHud;
+
         // ================= 爬管道 / 滑索 =================
 
         public readonly ConfigEntry<bool> VentNonImpostor;
@@ -305,10 +314,23 @@ namespace ApexCheatEnder.Config
                 "跟同样装了 Apex Cheat Ender 的人互相认一下，" + NL +
                 "在对方名字后面加个标记，方便看出谁是自己人。" + NL +
                 "原理是发一条游戏不用的网络消息，对方也装了就会回。");
-            AcePresenceTag = cfg.Bind(F, "标记写成什么", Core.AcePresence.DefaultTag,
+            AcePresenceTag = cfg.Bind(F, "标记写成什么", Core.PresenceTags.AceDefault,
                 "显示在对方名字后面的文字。" + NL +
                 "默认带两个表情符号；如果游戏里显示成方块，" + NL +
                 "改成纯文字（比如 [ACE]）即可。");
+
+            AmethystPresenceEnabled = cfg.Bind(F, "标记装了 Amethyst 的玩家", true,
+                "Amethyst（amethyst.mod）也是 Among Us 的客户端模组，" + NL +
+                "它自己会周期性广播一条识别包。这里只**旁听**那条包，" + NL +
+                "认出谁装了 Amethyst，在名字后面加标记。" + NL +
+                "不会给 Amethyst 发任何东西，也不会拦它的包。");
+            AmethystPresenceTag = cfg.Bind(F, "Amethyst 标记写成什么", Core.PresenceTags.AmethystDefault,
+                "显示在 Amethyst 用户名字后面的文字。");
+
+            ShowStatsHud = cfg.Bind(F, "显示帧率延迟房主", true,
+                "屏幕左上角显示一行小字：当前帧率、与服务器的延迟、" + NL +
+                "以及自己是房主还是普通客户端。" + NL +
+                "只在连上房间后显示；延迟超过 100 毫秒变黄、超过 200 毫秒变红。");
 
             // ---------------- 爬管道 / 滑索 ----------------
             const string G = "爬管道和滑索";

@@ -19,7 +19,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>ApexCheatEnder</AssemblyName>
     <RootNamespace>ApexCheatEnder</RootNamespace>
-    <Version>1.1.3</Version>
+    <Version>1.1.4</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>

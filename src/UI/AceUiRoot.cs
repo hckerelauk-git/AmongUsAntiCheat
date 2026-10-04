@@ -95,6 +95,7 @@ namespace ApexCheatEnder.UI
                 MainMenuArt.Tick();
                 SettingsWindow.EnsureBuilt(root);
                 NotificationPanel.EnsureBuilt(root);
+                StatsHud.EnsureBuilt(root);
 
                 // 桌面右下角启动动画只播一次。
                 // 延迟到游戏跑起来之后再弹：桌面窗口走的是原生消息循环，
@@ -118,6 +119,11 @@ namespace ApexCheatEnder.UI
                 SettingsWindow.Tick(Input.GetKeyDown(KeyCode.Insert));
                 NotificationPanel.Tick();
                 ChatAbuseNotice.Tick(root);
+                StatsHud.Tick();
+
+                // 名字标记由帧驱动刷新：游戏的 PlayerControl 没有 Update 方法，
+                // 挂在上面会直接挂载失败，标记就永远不生效。
+                if (!SettingsWindow.IsOpen) Core.AcePresence.RefreshNameTags();
 
                 if (!_firstFrameLogged)
                 {

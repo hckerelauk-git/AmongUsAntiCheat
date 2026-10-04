@@ -42,6 +42,7 @@
     <Compile Include="..\src\Core\Violation.cs" Link="sut\Violation.cs" />
     <Compile Include="..\src\Core\PlayerVerdict.cs" Link="sut\PlayerVerdict.cs" />
     <Compile Include="..\src\Core\BehaviorAnalyzer.cs" Link="sut\BehaviorAnalyzer.cs" />
+    <Compile Include="..\src\Core\PresenceTags.cs" Link="sut\PresenceTags.cs" />
   </ItemGroup>
 
 </Project>

@@ -72,6 +72,37 @@ namespace ApexCheatEnder
             }
         }
 
+        /// <summary>
+        /// 当前与服务器之间的往返延迟（毫秒）。
+        ///
+        /// 取的是游戏自己维护的 <c>InnerNetClient.Ping</c>，不是我们另测的。
+        /// 未联机 / 未进入房间时它可能是 0 或无意义值，调用方需要判断
+        /// <see cref="IsInGame"/> 或连接状态后再显示，别把 0 当成「延迟极好」。
+        /// </summary>
+        public static int GetPing()
+        {
+            try
+            {
+                var client = AmongUsClient.Instance;
+                return client == null ? -1 : client.Ping;
+            }
+            catch { return -1; }
+        }
+
+        /// <summary>是否已连接到房间（大厅或对局中都算）。</summary>
+        public static bool IsConnected
+        {
+            get
+            {
+                try
+                {
+                    var client = AmongUsClient.Instance;
+                    return client != null && client.ClientId >= 0;
+                }
+                catch { return false; }
+            }
+        }
+
         // ==================================================================
         //  玩家枚举
         // ==================================================================

@@ -24,7 +24,7 @@ namespace ApexCheatEnder
     {
         public const string PluginGuid = "apex.cheat.ender";
         public const string PluginName = "ApexCheatEnder";
-        public const string PluginVersion = "1.1.3";
+        public const string PluginVersion = "1.1.4";
 
         /// <summary>供补丁层写日志的全局入口。</summary>
         internal static ManualLogSource LogSource;
@@ -116,7 +116,11 @@ namespace ApexCheatEnder
 
             // ACE 客户端互认：认出房间里同样装了本插件的人，并在其名字上加标记
             TryPatch(typeof(AcePresenceRpcPatch), "ACE 互认(握手)");
-            TryPatch(typeof(AcePresenceNamePatch), "ACE 互认(名字标记)");
+
+            // Amethyst 互认：只旁听它的模组探测包，识别装了 amethyst.mod 的玩家。
+            // 名字标记不在这里挂 —— 游戏的 PlayerControl 没有 Update 方法，
+            // 挂在上面必然失败；改由本插件的帧驱动刷新（见 AcePresence.RefreshNameTags）。
+            TryPatch(typeof(AmethystPresencePatch), "AME 互认(旁听)");
         }
 
         private void TryPatch(Type patchType, string label)

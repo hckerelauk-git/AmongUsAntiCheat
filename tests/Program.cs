@@ -62,6 +62,7 @@ namespace ApexCheatEnder.Tests
             Run("拦截：接收端 RPC 守卫源码约束", TestRpcGuardSource);
             Run("任务：坐标不可信时不做绝对距离定罪", TestTaskPositionTrust);
             Run("扫描：不得把本插件判成作弊", TestScannerSelfExclusion);
+            Run("互认：Amethyst 旁听边界", TestAmethystPresenceSource);
             Run("GameVec2：距离与向量运算", TestGameVec2);
             Run("PlayerTrack：快照位移/时间差计算", TestPlayerTrackDelta);
             Run("PlayerTrack：合法传送豁免窗口", TestLegalTeleportWindow);
@@ -386,6 +387,47 @@ namespace ApexCheatEnder.Tests
             // 命中来源要如实记录，不能再把文件深度匹配写成「元数据匹配」。
             True(scanner.Contains("out var source") && scanner.Contains("DLL 类型标记匹配"),
                 "黑名单命中来源必须区分元数据与 DLL 深度匹配");
+        }
+
+        /// <summary>
+        /// Amethyst 互认的三条硬约束。
+        ///
+        /// Amethyst 用 PlayerPhysics.HandleRpc 的 callId 50 + 固定标识串做模组探测。
+        /// ACE 只是旁听者，一旦越界就会破坏对方功能或冒名：
+        ///   1. 不能发送任何探测包（发了对方会把 ACE 当成 Amethyst 用户 = 冒名）
+        ///   2. 不能丢包（Amethyst 靠 return false 吃掉自己的包，ACE 再拦会破坏它）
+        ///   3. 必须复原 reader.Position（否则 Amethyst 与游戏会解析错位）
+        /// </summary>
+        private static void TestAmethystPresenceSource()
+        {
+            var source = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src"));
+            var core = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "Core/AmethystPresence.cs"));
+            var patch = System.IO.File.ReadAllText(System.IO.Path.Combine(source, "Patches/AmethystPresencePatch.cs"));
+
+            // 协议常量必须与 Amethyst 实际实现一致
+            True(core.Contains("\"AMETHYST_MOD_CLIENT_V1\""), "标识串必须与 Amethyst 一致");
+            True(core.Contains("AmethystCallId = 50"), "callId 必须是 Amethyst 实际使用的 50");
+
+            // 1. 只读不写
+            True(!patch.Contains("StartRpcImmediately") && !patch.Contains("FinishRpcImmediately"),
+                "旁听层不得发送任何 RPC");
+            True(!core.Contains("StartRpcImmediately"), "核心层不得发送任何 RPC");
+
+            // 2. 永不丢包
+            var prefixStart = patch.IndexOf("private static bool Prefix", StringComparison.Ordinal);
+            var prefixEnd = patch.IndexOf("private static byte ExtractCallId", StringComparison.Ordinal);
+            True(prefixStart >= 0 && prefixEnd > prefixStart, "应能定位 Prefix 方法体");
+            var prefix = patch.Substring(prefixStart, prefixEnd - prefixStart);
+            True(prefix.Contains("return true;"), "Prefix 必须放行");
+            True(!prefix.Contains("return false;"), "Prefix 不得丢包，否则会破坏 Amethyst 自身互认");
+
+            // 3. 读取位置必须复原 + 必须抢在 Amethyst 之前
+            True(core.Contains("reader.Position = start"), "旁听必须复原 MessageReader.Position");
+            True(patch.Contains("HarmonyPriority(Priority.High)"),
+                "必须抢在 Amethyst 的 Prefix 之前，否则它丢包后我们就看不到这些包");
+
+            // 4. 防冒名：包里声明的 id 必须等于发送者自己的 id
+            True(core.Contains("claimedId != sender.PlayerId"), "必须校验包内 id 与发送者一致");
         }
 
         private static void TestAutomaticMenuArt()

@@ -49,24 +49,4 @@ namespace ApexCheatEnder.Patches
             return true;
         }
     }
-
-    /// <summary>
-    /// 玩家对象每帧更新后纠正名字标记。
-    ///
-    /// 必须挂在 Update 之后，而不是只在收到握手包时改一次：
-    /// 游戏自己会不断重写 nameText（改名、换装、进会议都会触发），
-    /// 只改一次会被立刻覆盖掉。
-    /// </summary>
-    [HarmonyPatch]
-    internal static class AcePresenceNamePatch
-    {
-        private static MethodBase TargetMethod() =>
-            PatchHelper.FindByName(typeof(PlayerControl), "Update");
-
-        private static void Postfix(PlayerControl __instance)
-        {
-            try { AcePresence.ApplyTag(__instance); }
-            catch { }
-        }
-    }
 }

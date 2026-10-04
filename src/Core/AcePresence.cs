@@ -113,18 +113,50 @@ namespace ApexCheatEnder.Core
             Broadcast();
         }
 
-        /// <summary>每帧调用（由 PlayerControl.Update 的 Postfix 驱动）。</summary>
-        public static void ApplyTag(PlayerControl player)
+        /// <summary>
+        /// 每帧调用，刷新所有玩家的名字标记。
+        ///
+        /// 为什么改成遍历而不是挂在 <c>PlayerControl.Update</c> 上：
+        /// 那版游戏根本没有这个方法，补丁挂载时直接报「未找到目标方法」被跳过，
+        /// 于是标记功能在真实环境里从来没生效过（好友现场日志里就是这么写的）。
+        /// 改由本插件已有的帧驱动调用，不再依赖游戏存在某个特定 Update。
+        /// </summary>
+        public static void RefreshNameTags()
         {
-            if (player == null || AcePlayers.Count == 0) return;
+            if (AcePlayers.Count == 0 && AmethystPresence.AmethystUserCount == 0) return;
 
-            var id = GameBridge.GetPlayerId(player);
-            if (id < 0 || !AcePlayers.Contains(id)) return;
-
-            // 节流：名字文本没必要每帧比对
             var now = Time.time;
             if (now < _nextNameRefresh) return;
             _nextNameRefresh = now + NameRefreshInterval;
+
+            try
+            {
+                var players = PlayerControl.AllPlayerControls;
+                if (players == null) return;
+
+                for (var i = 0; i < players.Count; i++)
+                {
+                    try { ApplyTag(players[i]); }
+                    catch { /* 单个玩家失败不影响其他人 */ }
+                }
+            }
+            catch
+            {
+                // 玩家列表结构随版本变化，拿不到就跳过，不影响反作弊主流程
+            }
+        }
+
+        /// <summary>给单个玩家套上标记（ACE 与 Amethyst 可同时命中）。</summary>
+        public static void ApplyTag(PlayerControl player)
+        {
+            if (player == null) return;
+
+            var id = GameBridge.GetPlayerId(player);
+            if (id < 0) return;
+
+            var isAce = AcePlayers.Contains(id);
+            var isAmethyst = AmethystPresence.IsAmethystUser(id);
+            if (!isAce && !isAmethyst) return;
 
             try
             {
@@ -136,10 +168,7 @@ namespace ApexCheatEnder.Core
                 var nameText = cosmetics.nameText;
                 if (nameText == null) return;
 
-                var tag = AntiCheatRuntime.Config?.AcePresenceTag.Value;
-                if (string.IsNullOrEmpty(tag)) tag = DefaultTag;
-
-                var want = GameBridge.GetPlayerName(player) + " " + tag;
+                var want = GameBridge.GetPlayerName(player) + BuildTags(isAce, isAmethyst);
                 if (nameText.text != want) nameText.text = want;
             }
             catch
@@ -148,8 +177,29 @@ namespace ApexCheatEnder.Core
             }
         }
 
-        /// <summary>默认标记文案。两侧的 emoji 是用户指定样式。</summary>
-        public const string DefaultTag = "😱ACE用户😱";
+        /// <summary>拼出名字后面的标记串；同时是 ACE 与 Amethyst 用户时两个都显示。</summary>
+        private static string BuildTags(bool isAce, bool isAmethyst)
+        {
+            var cfg = AntiCheatRuntime.Config;
+            var parts = new List<string>(2);
+
+            if (isAce && (cfg?.AcePresenceEnabled.Value ?? true))
+            {
+                var tag = cfg?.AcePresenceTag.Value;
+                parts.Add(string.IsNullOrEmpty(tag) ? DefaultTag : tag);
+            }
+
+            if (isAmethyst && (cfg?.AmethystPresenceEnabled.Value ?? true))
+            {
+                var tag = cfg?.AmethystPresenceTag.Value;
+                parts.Add(string.IsNullOrEmpty(tag) ? AmethystPresence.DefaultTag : tag);
+            }
+
+            return parts.Count == 0 ? string.Empty : " " + string.Join(" ", parts);
+        }
+
+        /// <summary>默认标记文案。常量集中在 <see cref="PresenceTags"/>，避免配置类被拖入游戏依赖。</summary>
+        public const string DefaultTag = PresenceTags.AceDefault;
 
         private static void Broadcast()
         {

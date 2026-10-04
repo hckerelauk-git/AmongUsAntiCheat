@@ -48,6 +48,9 @@ namespace ApexCheatEnder
         private static float _nextSampleTime;
         private static float _roundStartTime;
         private static bool _wasInGame;
+
+        /// <summary>上一帧的对局状态，仅用于识别「刚离开对局」这个边沿。</summary>
+        private static bool _wasInGameAtPresence;
         private static bool _wasInMeeting;
 
         /// <summary>
@@ -334,6 +337,14 @@ namespace ApexCheatEnder
             // ACE 客户端互认：周期性广播握手包，认出房间里同装本插件的人。
             // 放在这里而不是 UI 层——它属于逻辑，UI 未创建时也该正常工作。
             AcePresence.Tick();
+
+            // 离开对局时清空 Amethyst 识别结果：PlayerId 每局重新分配，
+            // 留着会把上一局的人认成本局的。
+            if (!inGame && _wasInGameAtPresence)
+            {
+                AmethystPresence.Reset();
+            }
+            _wasInGameAtPresence = inGame;
 
             if (!inGame)
             {
