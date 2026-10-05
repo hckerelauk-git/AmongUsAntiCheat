@@ -30,8 +30,33 @@ namespace ApexCheatEnder.Core
         /// </summary>
         public const string AmethystNameHex = "FF8FD0";
 
+        /// <summary>
+        /// 高风险标记。命中确定性规则，或同一条规则被重复确认多次。
+        ///
+        /// **抓到就必须标在头上。** 打游戏的时候没人会去翻日志 ——
+        /// 日志是事后取证用的，当场能看见的只有名字标记。
+        /// </summary>
+        public const string HighRiskMark = "⛔高危";
+
+        /// <summary>可疑标记（命中规则但证据还不够确定）。</summary>
+        public const string SuspiciousMark = "⚠可疑";
+
+        /// <summary>高风险名字色（红）。</summary>
+        public const string HighRiskNameHex = "FF5555";
+
+        /// <summary>可疑名字色（橙）。</summary>
+        public const string SuspiciousNameHex = "FFB020";
+
         /// <summary>没装任何模组的玩家标记。</summary>
-        public const string VanillaDefault = "原本玩家";
+        public const string VanillaDefault = "原版玩家";
+
+        /// <summary>
+        /// 旧版的默认文案（「原本玩家」是笔误，正确写法是「原版玩家」）。
+        ///
+        /// BepInEx 会把默认值写进 cfg 文件，之后**改默认值对已有配置无效** ——
+        /// 用户配置里存的是这一串。用它做一次性迁移判断，见 AntiCheatConfig。
+        /// </summary>
+        public const string LegacyVanillaTag = "原本玩家";
 
         /// <summary>
         /// 旧版的 Amethyst 标记（紫心）。

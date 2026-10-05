@@ -174,6 +174,63 @@ namespace ApexCheatEnder
             catch { return "?"; }
         }
 
+        /// <summary>
+        /// 取玩家的好友码，格式 <c>名字#四位数字</c>（如 <c>sloehind#4553</c>）。
+        ///
+        /// 这是**改名甩不掉**的身份标识，封禁名单优先靠它匹配。
+        /// 拿不到时返回空串 —— 远端玩家在部分平台上确实不广播好友码。
+        /// </summary>
+        public static string GetFriendCode(PlayerControl player)
+        {
+            try
+            {
+                var code = player?.Data?.FriendCode;
+                return string.IsNullOrWhiteSpace(code) ? string.Empty : code.Trim();
+            }
+            catch { return string.Empty; }
+        }
+
+        /// <summary>
+        /// 取玩家的平台用户 ID（ProductUserId）。比好友码更底层，换号也甩不掉。
+        /// 拿不到时返回空串。
+        /// </summary>
+        public static string GetPuid(PlayerControl player)
+        {
+            try
+            {
+                var puid = player?.Data?.Puid;
+                return string.IsNullOrWhiteSpace(puid) ? string.Empty : puid.Trim();
+            }
+            catch { return string.Empty; }
+        }
+
+        /// <summary>
+        /// 玩家的运动状态摘要，供诊断输出。
+        ///
+        /// 位置类误报的根因几乎都是「某个合法状态没被识别」，
+        /// 而日志里只写「位移 19.18 单位」是查不出来的 ——
+        /// 必须同时看到 inVent / onLadder / inMovingPlat 这些标志当时的取值。
+        /// </summary>
+        public static string DescribeMotionState(PlayerControl player)
+        {
+            if (player == null) return "<null>";
+
+            string Flag(string name, System.Func<bool> read)
+            {
+                try { return name + "=" + (read() ? "1" : "0"); }
+                catch { return name + "=?"; }
+            }
+
+            return string.Join(" ",
+                Flag("inVent", () => player.inVent),
+                Flag("onLadder", () => player.onLadder),
+                Flag("inMovingPlat", () => player.inMovingPlat),
+                Flag("dead", () => player.Data?.IsDead ?? true),
+                Flag("canMove", () => player.moveable),
+                Flag("impostor", () => IsImpostor(player)),
+                Flag("inMeeting", () => IsInMeeting));
+        }
+
         /// <summary>获取玩家当前的世界坐标。</summary>
         public static GameVec2 GetPosition(PlayerControl player)
         {
@@ -213,7 +270,7 @@ namespace ApexCheatEnder
         ///   · <c>onLadder</c>      —— 爬梯子
         ///   · <c>inMovingPlat</c>  —— 站移动平台（飞艇上的平台会带着玩家飞）
         ///
-        /// 现场误报就是栽在只检查了 <c>inVent</c>：一轮里 6 个不同玩家被判瞬移，
+        /// 误报源于仅检查 <c>inVent</c>：一局中 6 名不同玩家被判瞬移，
         /// 位移 4.79~16.44 单位 —— 多个玩家同时命中同一条规则，问题一定在规则上。
         /// </summary>
         public static bool IsInSpecialMovement(PlayerControl player)
@@ -546,10 +603,10 @@ namespace ApexCheatEnder
 
                 // 中心 + 四周各 0.3 单位的四个点，**全部**落在墙里才算「陷在墙中」。
                 //
-                // 两个理由，都是现场踩出来的：
+                // 两条依据，均来自实测：
                 //  1. `Ship` 层不只包含墙 —— 桌子、控制台、装饰这些船内物件都在这一层。
                 //     只测中心一个点，玩家贴着桌子或控制台边缘站立就会被判穿墙。
-                //     现场两个不同玩家在同一位置同时被报，正是这个特征。
+                //     实测中两名不同玩家在同一位置同时被报，即为该特征。
                 //  2. 触发器碰撞体是控制台/通风管之类的交互区，不是墙，必须排除。
                 const float radius = 0.3f;
                 return InsideAt(point, 0f, 0f)
@@ -646,7 +703,7 @@ namespace ApexCheatEnder
         /// 走玩家自己的 myTasks 列表，而不是 ShipStatus 的 ShortTasks/LongTasks 数组：
         /// 后者的类型是 Il2CppReferenceArray&lt;T&gt;，其泛型约束在当前 interop 版本下
         /// 无法被 NormalPlayerTask / PlayerTask 满足（编译期即失败）。
-        /// myTasks 是普通的 Il2Cpp List，访问稳定且语义更直接——就是「这个玩家要做的任务」。
+        /// myTasks 为普通 Il2Cpp List，访问稳定且语义更明确 —— 即「该玩家待完成的任务」。
         /// </summary>
         public static GameVec2? GetTaskPosition(PlayerControl player, int taskId)
         {

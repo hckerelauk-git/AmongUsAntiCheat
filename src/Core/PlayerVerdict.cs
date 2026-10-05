@@ -23,6 +23,33 @@ namespace ApexCheatEnder.Core
         /// <summary>其中确定性证据（Critical）的条数。</summary>
         public int CriticalCount { get; set; }
 
+        /// <summary>
+        /// 同一条规则重复命中多少次后视为确定性证据。
+        ///
+        /// 为什么需要这条：像「持续超速」这种规则，单次命中的严重度是 High，
+        /// 而等级判定只看 Critical —— 于是一个人连续超速 8 次、最高到 1.77 倍速，
+        /// 却永远停在「可疑」，升不到高危。实测日志里就是这样。
+        ///
+        /// 这不是「分数累计」：分数累计是「不同规则的权重加起来够大就定罪」，
+        /// 而这里是**同一条规则被独立确认了 N 次**，和超速判定内部
+        /// 「连续 3 次采样才算一次命中」是同一个思路。
+        /// </summary>
+        public const int RepeatConfirmCount = 5;
+
+        /// <summary>按规则类型累计的命中次数。</summary>
+        private readonly Dictionary<ViolationKind, int> _kindCounts = new Dictionary<ViolationKind, int>();
+
+        /// <summary>是否存在「同一条规则重复命中达到阈值」。</summary>
+        public bool HasRepeatedRule
+        {
+            get
+            {
+                foreach (var c in _kindCounts.Values)
+                    if (c >= RepeatConfirmCount) return true;
+                return false;
+            }
+        }
+
         public bool Warned { get; set; }
         public bool KickIssued { get; set; }
 
@@ -43,7 +70,7 @@ namespace ApexCheatEnder.Core
         ///
         /// 注意：**不能只用它来去重**。早期实现是「等级没升就不弹」，
         /// 结果一个玩家一旦升到高风险，之后所有作弊都被静默 ——
-        /// 现场表现就是「通知只爆一次，后面的作弊就不管了」。
+        /// 表现为「仅提示一次，后续作弊不再告警」。
         /// 现在它只负责判断「是否升级」，重复提示的节流交给
         /// <see cref="LastNotifiedEvidenceCount"/> 与 <see cref="LastNotifyTime"/>。
         /// </summary>
@@ -110,16 +137,30 @@ namespace ApexCheatEnder.Core
             if (Evidence.Count == 0) return RiskLevel.Normal;
             if (AiConfirmed) return RiskLevel.Confirmed;
             if (CriticalCount > 0) return RiskLevel.HighRisk;
+            // 同一规则被重复确认多次 —— 偶发解释不了，按高危处理
+            if (HasRepeatedRule) return RiskLevel.HighRisk;
             return RiskLevel.Suspicious;
         }
 
         public void AddEvidence(Violation v)
         {
             if (v == null) return;
-            if (Evidence.Count >= 128) Evidence.RemoveAt(0);
+
+            if (Evidence.Count >= 128)
+            {
+                // 淘汰最旧一条时，计数也要跟着减，否则 _kindCounts 会越算越多
+                var dropped = Evidence[0];
+                Evidence.RemoveAt(0);
+                if (_kindCounts.TryGetValue(dropped.Kind, out var d) && d > 0)
+                    _kindCounts[dropped.Kind] = d - 1;
+            }
+
             Evidence.Add(v);
             EvidenceCount++;
             if (v.Severity == Severity.Critical) CriticalCount++;
+
+            _kindCounts.TryGetValue(v.Kind, out var c);
+            _kindCounts[v.Kind] = c + 1;
         }
 
         public void Reset()
@@ -136,6 +177,7 @@ namespace ApexCheatEnder.Core
             AiSummary = null;
             AiConfidence = 0;
             Evidence.Clear();
+            _kindCounts.Clear();
         }
     }
 }

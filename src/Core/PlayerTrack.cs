@@ -72,6 +72,15 @@ namespace ApexCheatEnder.Core
         /// <summary>本回合累计的瞬移证据次数，用于判断是否为惯犯。</summary>
         public int TeleportStrikeCount { get; set; }
 
+        /// <summary>
+        /// 最近一次击杀的目标玩家号。
+        ///
+        /// 用来识别「同一次击杀被上报两次」：游戏里不可能杀同一个人两次
+        /// （第二次时对方已经是尸体），所以「同凶手 + 同目标 + 极短间隔」
+        /// 必然是同一个事件。没有这个判断，一次击杀会立刻变成冷却绕过的误报。
+        /// </summary>
+        public int LastKillVictimId { get; set; } = -1;
+
         /// <summary>最近一次击杀的时刻，用于冷却绕过判定。</summary>
         public float LastKillTime { get; set; } = float.NegativeInfinity;
 
@@ -84,6 +93,19 @@ namespace ApexCheatEnder.Core
 
         /// <summary>最近若干次位置采样，用于回溯性轨迹分析。</summary>
         public readonly Queue<PlayerSnapshot> History = new Queue<PlayerSnapshot>(64);
+
+        /// <summary>
+        /// 待确认的瞬移：本帧检测到「物理上不可能的位移」，但要等下一帧看落点稳不稳。
+        ///
+        /// 网络抖动与真实瞬移的区别就在这里：
+        ///   抖动 → 位置跳过去，下一帧又跳回原处（客户端拿到权威位置后自我纠正）
+        ///   瞬移 → 落点稳定，不会回去
+        /// 立即上报会把前者全判成作弊，实测就出现过 11.77 单位的单帧跳变。
+        /// </summary>
+        public bool HasPendingTeleport { get; set; }
+        public GameVec2 PendingFrom { get; set; }
+        public float PendingDistance { get; set; }
+        public float PendingDeltaTime { get; set; }
 
         /// <summary>上一次上报瞬移证据的时刻，用于去重——避免持续瞬移时刷屏。</summary>
         public float LastTeleportReportTime { get; set; } = float.NegativeInfinity;
@@ -163,8 +185,10 @@ namespace ApexCheatEnder.Core
             ConsecutiveSpeedStrikes = 0;
             ConsecutiveTaskStrikes = 0;
             LastKillTime = float.NegativeInfinity;
+            LastKillVictimId = -1;
             LastTaskTime = float.NegativeInfinity;
             LastLegalTeleportTime = float.NegativeInfinity;
+            HasPendingTeleport = false;
             ConsecutiveMeetingMoveStrikes = 0;
             ConsecutiveWallStrikes = 0;
             LastChatReportTime = float.NegativeInfinity;

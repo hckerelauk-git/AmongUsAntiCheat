@@ -6,7 +6,7 @@ namespace ApexCheatEnder.Core
     /// <summary>
     /// 一个 AI 供应商的完整描述。
     ///
-    /// 设计意图：端点地址、模型名这些「用户不该也不需要填」的东西，
+    /// 设计意图：端点地址、模型名等「用户无需填写」的字段，
     /// 全部封在这个对象里。用户只需要填一把密钥。
     ///
     /// 想加供应商（比如换成别的厂商）时，只需要在这里加一行 new，
@@ -23,7 +23,7 @@ namespace ApexCheatEnder.Core
         /// <summary>模型名，用户永远不需要看到这个。</summary>
         public string Model { get; }
 
-        /// <summary>一句话说明，界面上用来解释「这东西是干嘛的」。</summary>
+        /// <summary>单行说明，用于界面展示用途。</summary>
         public string Summary { get; }
 
         /// <summary>密钥长什么样，界面上给个样例，用户才知道填对了没。</summary>
@@ -63,7 +63,7 @@ namespace ApexCheatEnder.Core
         ///
         /// 现实里复制粘贴经常会带上首尾空格、换行、制表符，
         /// 而 HTTP 头里带这些字符会被服务端直接拒绝，
-        /// 表现为「密钥明明是对的却报 401」，非常难查。这里统一清一遍。
+        /// 表现为「密钥正确却返回 401」，排查困难。此处统一清理。
         /// </summary>
         public string NormalizeKey(string raw)
         {
@@ -84,11 +84,11 @@ namespace ApexCheatEnder.Core
     /// 供应商目录。
     ///
     /// 目前只注册 DeepSeek 一个——它的价格低、国内直连不用梯子、
-    /// 而且完全兼容我们要用的接口协议，是这个场景下的默认选择。
+    /// 且完全兼容所需接口协议，为该场景的默认选择。
     ///
     /// 故意不做成「用户自己填地址」的形式：
-    /// 那意味着用户要面对一串 URL 和模型名，填错一个字符就是 404，
-    /// 而普通玩家根本判断不出是自己填错了还是服务挂了。
+    /// 否则用户需面对一串 URL 与模型名，任一字符错误即导致 404，
+    /// 而普通用户无法判断是配置错误还是服务异常。
     /// 端点由代码保证正确，用户只需要一把密钥。
     /// </summary>
     public static class AiProviders

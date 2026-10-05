@@ -32,7 +32,7 @@ namespace ApexCheatEnder.UI
         /// <summary>右下角缩放手柄的边长。</summary>
         private const float ResizeGripSize = 22f;
         private const float TitleBarHeight = 72f;
-        private const float TabColumnWidth = 148f;
+        private const float TabColumnWidth = 166f;
         private const float FooterHeight = 54f;
         private const float ContentPadding = 34f;
 
@@ -45,7 +45,7 @@ namespace ApexCheatEnder.UI
         // ================= 侧边栏尺寸 =================
         // 页签 44 高、间隔 52：留 8px 空隙，比原来 42/48 更透气。
         private const float TabHeight = 50f;
-        private const float TabSpacing = 58f;
+        private const float TabSpacing = 62f;
 
         /// <summary>窗口圆角半径（与监控面板同一套 9 宫格卡片）。</summary>
         private const int WindowRadius = 16;
@@ -182,7 +182,7 @@ namespace ApexCheatEnder.UI
             /// <summary>
             /// 开关行的当前状态（仅 Toggle 行提供）。
             /// 之前靠解析 GetValue() 返回的 "[ 开 ]" 字符串来判断颜色与位置 ——
-            /// 靠中文字符猜状态，改一句文案就会错。改由这里直接给布尔值。
+            /// 依靠中文字符推断状态，文案变更即失效。改由此处直接提供布尔值。
             /// </summary>
             public Func<bool> GetState;
 
@@ -203,7 +203,7 @@ namespace ApexCheatEnder.UI
 
         /// <summary>
         /// 每个页签的图标形状，与 <see cref="TabNames"/> 一一对应。
-        /// 用形状而不是内置图片：插件要保证「一个 dll 就是完整插件」，
+        /// 使用形状而非内置图片：插件需保证「单个 DLL 即完整插件」，
         /// 且这些几何图形由 <c>AceTheme.Glyph</c> 程序生成，任意尺寸都清晰。
         /// </summary>
         private static readonly AceTheme.GlyphShape[] TabGlyphs =
@@ -218,12 +218,12 @@ namespace ApexCheatEnder.UI
 
         private static readonly string[] TabHints =
         {
-            "总开关和界面显示。一般不用改。",
-            "按移动、击杀任务、会议聊天分类调整检测阈值。",
-            "抓到人之后怎么处置，命中的规则怎么记。",
-            "检查爬通风管、滑索、刷数据包这类动作。",
-            "版本信息和快捷键。",
-            "本地事件、风险详情、阈值预设和脱敏诊断；不上传数据。",
+            "检测模块开关与界面选项。",
+            "按移动、动作、会议分类调整检测阈值。",
+            "处置策略与规则记录方式。",
+            "通风管、滑索与网络层防护。",
+            "版本信息与快捷键。",
+            "本地事件、风险详情、阈值预设与脱敏诊断。数据不上传。",
         };
 
         // ================= 构建 =================
@@ -263,7 +263,7 @@ namespace ApexCheatEnder.UI
 
             // ---- 标题区 ----
             // 装饰件全部拆掉：横贯窗口的顶部强调条、盾牌图标、四处分隔线、状态条。
-            // 它们各自都不大，叠在一起就是「拥挤臃肿」的来源。
+            // 各自尺寸不大，叠加后即形成视觉拥挤。
             // 现在只留图标 + 标题 + 一行副标题 + 右侧快捷键提示，靠留白撑开。
             var iconTex = AceTheme.Icon();
             if (iconTex != null)
@@ -306,7 +306,7 @@ namespace ApexCheatEnder.UI
                 new Vector2(TabColumnWidth, WindowHeight - TitleBarHeight - FooterHeight));
 
             // 页签不再套一层底色方框，也不画左侧分隔线：
-            // 选中态用文字色 + 一条竖色条表达，未选中就是普通灰字。
+            // 选中态使用文字色与竖色条表示，未选中为普通灰字。
 
             // ---- 页标题与页说明：固定在窗口上，不随内容滚动 ----
             var textLeft = TabColumnWidth + ContentPadding;
@@ -480,15 +480,19 @@ namespace ApexCheatEnder.UI
                 UnityEngine.Object.Destroy(tab.Rect.gameObject);
             }
             SubTabs.Clear();
-            var names = page == 1 ? new[] { "移动", "击杀 / 任务", "会议 / 聊天" }
-                : page == 5 ? new[] { "记录与工具" } : new[] { "全部设置" };
-            var width = (WindowWidth - TabColumnWidth - ContentPadding * 2f - (names.Length - 1) * 6f) / names.Length;
-            for (var i = 0; i < names.Length; i++)
+            // 子标签由 SettingsLayout 的表驱动，每页各有自己的划分。
+            // 只有一个子标签的页面直接不画 —— 画了也没得切，纯占地方。
+            var defs = SettingsLayout.SubTabsFor(page);
+            if (defs.Length <= 1) return;
+            if (SelectedSubTabs[page] >= defs.Length) SelectedSubTabs[page] = 0;
+
+            var width = (WindowWidth - TabColumnWidth - ContentPadding * 2f - (defs.Length - 1) * 6f) / defs.Length;
+            for (var i = 0; i < defs.Length; i++)
             {
                 var image = UiBuilder.CreateImage("SubTab" + i, _subTabArea, i == SelectedSubTabs[page] ? AceTheme.TabActiveBg : AceTheme.RowBgA);
                 UiBuilder.Place(image.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                     new Vector2(i * (width + 6f), 0f), new Vector2(width, 30f));
-                var text = CreateText("Label", image.transform, names[i], UiBuilder.LoadFont(14), 13,
+                var text = CreateText("Label", image.transform, defs[i].Name, UiBuilder.LoadFont(14), 13,
                     i == SelectedSubTabs[page] ? AceTheme.Accent : AceTheme.TextDim, TextAnchor.MiddleCenter);
                 UiBuilder.Stretch(text.rectTransform, 4f, 4f, 0f, 0f);
                 SubTabs.Add(new TabEntry { Index = i, Rect = image.rectTransform });
@@ -505,7 +509,7 @@ namespace ApexCheatEnder.UI
             // ── 清空内容区 ──
             // 行和分组标题现在都直接挂在 _contentArea 下面。
             // 原来只销毁分组标题、不销毁行节点，于是换页或改配置触发重建时，
-            // 旧行会留在原地和新行叠在一起 —— 现场表现就是文字重影、糊成一团。
+            // 旧行会残留在原位与新行重叠 —— 表现为文字重影、内容糊成一团。
             // 必须整个清空，重建才是干净的。
             if (_contentArea != null)
             {
@@ -531,15 +535,15 @@ namespace ApexCheatEnder.UI
 
             // ── 扁平列表 ──
             // 不再用「卡片 + 可折叠分组」：那是两级导航，用户要展开才知道里面有什么，
-            // 而且每张卡片都有自己的圆角底板与边框，视觉上非常碎。
-            // 现在改成：分组只作为一行小号标题文字，内容直接跟在后面，一次看完。
+            // 且每张卡片均有独立圆角底板与边框，视觉上过于零碎。
+            // 现改为：分组仅作为一行小号标题，内容紧随其后，一屏可览。
             var cursor = 0f;
             var group = -1;
             for (var i = 0; i < model.Count; i++)
             {
                 var row = model[i];
                 var rowGroup = SettingsLayout.Group(page, i);
-                if (page == 1 && rowGroup != SelectedSubTabs[page]) continue;
+                if (!SettingsLayout.RowVisible(page, i, SelectedSubTabs[page])) continue;
 
                 if (group != rowGroup)
                 {
@@ -556,7 +560,8 @@ namespace ApexCheatEnder.UI
                     cursor += SettingsLayout.SectionCaptionHeight;
                 }
 
-                var rowHeight = SettingsLayout.RowHeight(row.Kind == RowKind.Number);
+                var hasHint = !string.IsNullOrEmpty(row.Hint);
+                var rowHeight = SettingsLayout.RowHeight(hasHint);
                 var y = -cursor;
                 cursor += rowHeight;
 
@@ -572,17 +577,32 @@ namespace ApexCheatEnder.UI
                 UiBuilder.Place(divider.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                     new Vector2(0f, 0f), new Vector2(contentWidth, 1f));
 
-                // 名称：单行、垂直居中，不再为说明文字预留第二行
+                // 名称 + 说明：说明**常驻在行内**，不再要求悬停。
+                //
+                // 之前为了压高度把说明挪到了底部描述栏、只在悬停时显示，
+                // 结果是「不把鼠标挨个划一遍就不知道每项是干什么的」——
+                // 以少量高度换取不可读的列表，取舍不成立。
                 var label = CreateText("RowLabel" + i, node.transform,
-                    row.Label, font, 14, AceTheme.TextMain, TextAnchor.MiddleLeft);
-                UiBuilder.Place(label.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    new Vector2(2f, 0f), new Vector2(contentWidth - 140f, rowHeight));
+                    row.Label, font, 14, AceTheme.TextMain,
+                    hasHint ? TextAnchor.UpperLeft : TextAnchor.MiddleLeft);
+                UiBuilder.Place(label.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(2f, hasHint ? -6f : -rowHeight * 0.5f),
+                    new Vector2(contentWidth - 140f, hasHint ? 20f : rowHeight));
                 label.horizontalOverflow = HorizontalWrapMode.Overflow;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
                 label.supportRichText = false;
 
-                // 说明不再逐行显示，改为鼠标悬停时在底部描述栏显示。
-                // 这是把「拥挤臃肿」压下去最关键的一步：行高直接砍掉一半以上。
+                if (hasHint)
+                {
+                    var desc = CreateText("RowDesc" + i, node.transform,
+                        row.Hint, UiBuilder.LoadFont(11), 11, AceTheme.TextDim, TextAnchor.UpperLeft);
+                    UiBuilder.Place(desc.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                        new Vector2(2f, -26f), new Vector2(contentWidth - 140f, 34f));
+                    desc.horizontalOverflow = HorizontalWrapMode.Wrap;
+                    desc.verticalOverflow = VerticalWrapMode.Truncate;
+                    desc.supportRichText = false;
+                }
+
                 var hintText = row.Hint ?? string.Empty;
 
                 if (row.Kind == RowKind.Number)
@@ -737,10 +757,26 @@ namespace ApexCheatEnder.UI
                     if (row.SwitchKnob != null)
                     {
                         var target = on ? SwitchKnobOnX : SwitchKnobOffX;
-                        // 滑块滑动做插值，切换时有过渡而不是瞬移
                         var p = row.SwitchKnob.anchoredPosition;
-                        p.x = Mathf.Lerp(p.x, target, 0.35f);
-                        row.SwitchKnob.anchoredPosition = p;
+
+                        // **到位就停手。**
+                        // Mathf.Lerp 是渐近的，永远收敛不到目标值 ——
+                        // 原来的写法每 0.2 秒都会写一次 anchoredPosition，
+                        // 每次写入都标脏整个 Canvas。20 个开关行 × 5Hz = 每秒上百次重建，
+                        // 即「UI 严重卡顿、游戏正常」的主因。
+                        if (Mathf.Abs(p.x - target) < 0.5f)
+                        {
+                            if (!Mathf.Approximately(p.x, target))
+                            {
+                                p.x = target;
+                                row.SwitchKnob.anchoredPosition = p;
+                            }
+                        }
+                        else
+                        {
+                            p.x = Mathf.Lerp(p.x, target, 0.35f);
+                            row.SwitchKnob.anchoredPosition = p;
+                        }
                     }
                     continue;
                 }
@@ -749,8 +785,14 @@ namespace ApexCheatEnder.UI
                 {
                     var fraction = SettingsLayout.Normalize(row.Model.ReadNumber(), row.Model.Min, row.Model.Max);
                     var width = row.SliderRect.rect.width;
-                    row.SliderFill.sizeDelta = new Vector2(width * fraction, 6f);
-                    row.SliderKnob.anchoredPosition = new Vector2(width * fraction, 0f);
+
+                    // 同上：RectTransform 赋值必标脏，值没变就别写。
+                    var fillWidth = width * fraction;
+                    if (!Mathf.Approximately(row.SliderFill.sizeDelta.x, fillWidth))
+                        row.SliderFill.sizeDelta = new Vector2(fillWidth, 6f);
+
+                    if (!Mathf.Approximately(row.SliderKnob.anchoredPosition.x, fillWidth))
+                        row.SliderKnob.anchoredPosition = new Vector2(fillWidth, 0f);
                 }
                 if (row.Model.GetValue == null || row.Value == null) continue;
                 var text = row.Model.GetValue();
@@ -794,31 +836,31 @@ namespace ApexCheatEnder.UI
         private static List<SettingRow> BuildGeneralPage(AntiCheatConfig cfg)
         {
             var list = new List<SettingRow>();
-            list.Add(Toggle("扫描作弊插件", cfg.EnableStaticScan,
+            list.Add(Toggle("静态插件扫描", cfg.EnableStaticScan,
                 "看看别人装了什么作弊插件。几乎不会误判，建议一直开着。"));
-            list.Add(Toggle("检测瞬移和超速", cfg.EnableBehaviorScan,
+            list.Add(Toggle("运动学检测", cfg.EnableBehaviorScan,
                 "定时记录每个人的位置，抓突然消失和跑得比正常人快。"));
-            list.Add(Toggle("检查动作是否合法", cfg.EnableEventScan,
+            list.Add(Toggle("动作合法性检测", cfg.EnableEventScan,
                 "检查击杀、爬管道这些动作在当前状态下能不能做。"));
-            list.Add(Toggle("检测穿墙", cfg.EnableWallClipCheck,
+            list.Add(Toggle("穿墙检测", cfg.EnableWallClipCheck,
                 "会额外吃一点性能，网络卡时容易误判。认准作弊用上面那几项就够。"));
-            list.Add(Toggle("顶部弹出提醒", cfg.ShowNotifications,
+            list.Add(Toggle("屏幕通知", cfg.ShowNotifications,
                 "命中检测规则时在屏幕上方弹一条通知。"));
-            list.Add(Toggle("开机启动动画", cfg.ShowDesktopSplash,
+            list.Add(Toggle("启动动画", cfg.ShowDesktopSplash,
                 "进游戏时在桌面右下角弹一下 Apex Cheat Ender 的加载动画。"));
-            list.Add(Toggle("标记同装 ACE 的玩家", cfg.AcePresenceEnabled,
+            list.Add(Toggle("ACE 用户标记", cfg.AcePresenceEnabled,
                 "跟同样装了 Apex Cheat Ender 的人互相认一下，在对方名字上加个标记。"));
-            list.Add(Info("名字标记文案", "改标记文字请直接编辑配置文件 apex.cheat.ender.cfg。",
+            list.Add(Info("ACE 标记文本", "改标记文字请直接编辑配置文件 apex.cheat.ender.cfg。",
                 () => string.IsNullOrEmpty(cfg.AcePresenceTag.Value) ? "（默认）" : "已自定义"));
-            list.Add(Toggle("抓非法破坏", cfg.SabotageCheck, "检查破坏者角色、会议状态和目标范围。"));
-            list.Add(Toggle("抓角色动作异常", cfg.RoleActionCheck, "检查变形、保护等角色能力是否合法。"));
-            list.Add(Toggle("抓聊天刷屏和非法消息", cfg.ChatCheck, "检查聊天频率和消息内容。"));
-            list.Add(Toggle("抓非法昵称", cfg.NameCheck, "检查空昵称、超长昵称和控制字符。"));
-            list.Add(Toggle("输出详细日志", cfg.VerboseLogging,
+            list.Add(Toggle("非法破坏检测", cfg.SabotageCheck, "检查破坏者角色、会议状态和目标范围。"));
+            list.Add(Toggle("角色能力检测", cfg.RoleActionCheck, "检查变形、保护等角色能力是否合法。"));
+            list.Add(Toggle("聊天频率与内容检测", cfg.ChatCheck, "检查聊天频率和消息内容。"));
+            list.Add(Toggle("昵称合法性检测", cfg.NameCheck, "检查空昵称、超长昵称和控制字符。"));
+            list.Add(Toggle("详细日志", cfg.VerboseLogging,
                 "只在怀疑误判、想查原因时开。日志会长得很快，平时关着。"));
-            list.Add(Toggle("疑似骂人短提示", cfg.ShowChatAbuseNotice,
+            list.Add(Toggle("聊天内容本地提示", cfg.ShowChatAbuseNotice,
                 "仅本地提示 1.2 秒，Esc 关闭；可能误报，不记作弊证据、不踢人。"));
-            list.Add(Info("疑似骂人关键词", "要改词表请直接编辑配置文件 apex.cheat.ender.cfg 里的「疑似骂人关键词」。",
+            list.Add(Info("触发关键词", "要改词表请直接编辑配置文件 apex.cheat.ender.cfg 里的「疑似骂人关键词」。",
                 () => (cfg.ChatAbuseKeywords.Value ?? string.Empty)
                     .Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries).Length + " 个词"));
             return list;
@@ -828,31 +870,31 @@ namespace ApexCheatEnder.UI
         private static List<SettingRow> BuildMovementPage(AntiCheatConfig cfg)
         {
             var list = new List<SettingRow>();
-            list.Add(Number("一下挪多远算瞬移", cfg.TeleportMinDistance, 0.5f, 0.5f, 20f,
+            list.Add(Number("瞬移判定距离", cfg.TeleportMinDistance, 0.5f, 0.5f, 20f,
                 "一次记录里位置突然变了这么多就是瞬移。正常走路一秒走不了这么远，几乎不会误判。"));
-            list.Add(Number("允许比正常快几倍", cfg.MaxSpeedTolerance, 0.1f, 1.0f, 5.0f,
+            list.Add(Number("速度上限倍率", cfg.MaxSpeedTolerance, 0.1f, 1.0f, 5.0f,
                 "1.0 是完全不放水。正常建议 1.5 到 1.8。朋友被误判就往大了调。"));
-            list.Add(Number("超速几次才记下来", cfg.SpeedStrikeCount, 1f, 1f, 20f,
+            list.Add(Number("超速确认次数", cfg.SpeedStrikeCount, 1f, 1f, 20f,
                 "偶尔超一下可能是卡了。连续超这么多次才算作弊证据。", true));
-            list.Add(Number("多小的位移算抖动", cfg.PositionJitterTolerance, 0.05f, 0f, 2f,
+            list.Add(Number("位移抖动容差", cfg.PositionJitterTolerance, 0.05f, 0f, 2f,
                 "小于这个距离当成网络延迟，不算作弊。网络差就往上调。"));
-            list.Add(Number("看位置的间隔", cfg.SampleInterval, 0.01f, 0.02f, 1.0f,
+            list.Add(Number("采样间隔", cfg.SampleInterval, 0.01f, 0.02f, 1.0f,
                 "越小抓得越紧，也越吃性能。0.1 是推荐值，觉得卡就调到 0.2。"));
-            list.Add(Number("开局后先不管几秒", cfg.RoundStartGracePeriod, 1f, 0f, 30f,
+            list.Add(Number("开局宽限期", cfg.RoundStartGracePeriod, 1f, 0f, 30f,
                 "对局刚开始大家都在传送，这段时间不判定，避免误报。"));
-            list.Add(Number("隔多远能砍人", cfg.KillDistanceTolerance, 0.25f, 0f, 5f,
+            list.Add(Number("击杀距离容差", cfg.KillDistanceTolerance, 0.25f, 0f, 5f,
                 "游戏设置的击杀距离之外再放宽这么多。调太小会漏掉远程击杀挂。"));
-            list.Add(Number("冷却能提前多久", cfg.KillCooldownTolerance, 0.05f, 0f, 5f,
+            list.Add(Number("击杀冷却容差", cfg.KillCooldownTolerance, 0.05f, 0f, 5f,
                 "内鬼杀人冷却是 25 秒。能提前这么多秒再杀就是绕过冷却。"));
-            list.Add(Number("做任务允许快几倍", cfg.TaskSpeedTolerance, 0.1f, 1.0f, 5f,
+            list.Add(Number("任务速度倍率", cfg.TaskSpeedTolerance, 0.1f, 1.0f, 5f,
                 "调太小会把边走边做任务的正常玩家误判成外挂。"));
-            list.Add(Number("隔多远能交任务", cfg.RemoteTaskTolerance, 0.5f, 0f, 10f,
+            list.Add(Number("任务提交距离容差", cfg.RemoteTaskTolerance, 0.5f, 0f, 10f,
                 "站在任务点附近这么远之内算完成。"));
-            list.Add(Number("开会时允许走多远", cfg.MeetingMoveTolerance, 0.25f, 0f, 5f,
+            list.Add(Number("会议位移容差", cfg.MeetingMoveTolerance, 0.25f, 0f, 5f,
                 "开会期间所有人都该站在会议桌附近，走太远就是有问题。"));
-            list.Add(Number("聊天 10 秒最多几条", cfg.ChatRateLimit, 1f, 3f, 50f,
+            list.Add(Number("聊天频率上限", cfg.ChatRateLimit, 1f, 3f, 50f,
                 "超过这个数量算刷屏。正常聊天很难达到 8 条。", true));
-            list.Add(Number("昵称最长多少字", cfg.NameMaxLength, 1f, 5f, 60f,
+            list.Add(Number("昵称长度上限", cfg.NameMaxLength, 1f, 5f, 60f,
                 "超过算异常。游戏原生上限是 10，这里留了余量。", true));
             return list;
         }
@@ -861,7 +903,7 @@ namespace ApexCheatEnder.UI
         private static List<SettingRow> BuildDispositionPage(AntiCheatConfig cfg)
         {
             var list = new List<SettingRow>();
-            list.Add(Action("动手的方式", "命中规则之后具体做什么。建议先选「警告」观察一阵，确认没误判再用更重的。",
+            list.Add(Action("处置方式", "命中规则之后具体做什么。建议先选「警告」观察一阵，确认没误判再用更重的。",
                 () =>
                 {
                     cfg.DispositionMode.Value = DispositionModes.Next(cfg.DispositionMode.Value);
@@ -869,11 +911,11 @@ namespace ApexCheatEnder.UI
                     AntiCheatRuntime.ApplyConfigChange();
                 },
                 () => "[ " + cfg.DispositionMode.Value + " ]"));
-            list.Add(Toggle("自动踢人", cfg.AllowAutoKick,
+            list.Add(Toggle("自动执行", cfg.AllowAutoKick,
                 "命中确定性规则就自动踢，不用你点确认。先只记录更保险。"));
-            list.Add(Toggle("记录谁进过房间", cfg.RecordPlayerHistory,
+            list.Add(Toggle("记录房间成员", cfg.RecordPlayerHistory,
                 "写进 PlayerHistory.txt，方便事后查谁来过。"));
-            list.Add(Toggle("记录作弊判定", cfg.RecordCheatHistory,
+            list.Add(Toggle("记录判定结果", cfg.RecordCheatHistory,
                 "写进 CheatHistory.txt，含昵称和命中的具体规则。万一误判了，这里就是翻案证据。"));
 
             // 手动踢人：列出房间里**所有人**，不只是命中规则的。
@@ -939,6 +981,39 @@ namespace ApexCheatEnder.UI
                             AntiCheatRuntime.Log?.LogWarning("[处置] 已手动踢出「" + name + "」。");
                     },
                     () => GameBridge.IsHost ? "点击踢出" : "需要房主"));
+
+                // ── 一键封禁 ──
+                // 抓到了却要手抄好友码去改配置文件，等于没抓到。
+                // 这里直接把人加进本地名单，写进配置立刻生效。
+                var banName = name;
+                var banPlayer = player;
+                list.Add(Action("封禁 " + banName,
+                    "把这个人加入封禁名单，写进配置文件并立刻生效。"
+                    + "没有好友码或平台 ID 的玩家无法封禁 —— 那种条目会误伤所有同名玩家。",
+                    () =>
+                    {
+                        var code = GameBridge.GetFriendCode(banPlayer);
+                        var puid = GameBridge.GetPuid(banPlayer);
+
+                        cfg.BanListExtra.Value = Core.BanListDb.AppendEntry(
+                            cfg.BanListExtra.Value, banName, code, puid, "手动封禁");
+
+                        // 只有填了写入令牌的机器才推服务器；其余只写本地。
+                        var token = cfg.BanListWriteToken?.Value;
+                        if (!string.IsNullOrWhiteSpace(token))
+                            Core.BanListRemote.PushBan(cfg.BanListEndpoint.Value, token,
+                                new Core.BanEntry { Name = banName, Code = code, Puid = puid, Reason = "手动封禁" });
+
+                        AntiCheatRuntime.ApplyConfigChange();
+                        FlashSaved();
+                        RefreshRowValues();
+                    },
+                    () =>
+                    {
+                        var code = GameBridge.GetFriendCode(banPlayer);
+                        var puid = GameBridge.GetPuid(banPlayer);
+                        return (code.Length == 0 && puid.Length == 0) ? "无好友码/平台ID，无法封禁" : "加入本地名单";
+                    }));
             }
             return list;
         }
@@ -947,33 +1022,33 @@ namespace ApexCheatEnder.UI
         private static List<SettingRow> BuildVentPage(AntiCheatConfig cfg)
         {
             var list = new List<SettingRow>();
-            list.Add(Toggle("抓普通人爬管道", cfg.VentNonImpostor,
+            list.Add(Toggle("非内鬼使用通风管", cfg.VentNonImpostor,
                 "只有内鬼能爬管道。其他人爬了就是开了挂。"));
-            list.Add(Toggle("抓隔着屏幕爬管道", cfg.VentRemote,
+            list.Add(Toggle("远距离使用通风管", cfg.VentRemote,
                 "离管道口很远却爬进去了。"));
-            list.Add(Toggle("抓伪造管道编号", cfg.VentForgedId,
+            list.Add(Toggle("伪造通风管编号", cfg.VentForgedId,
                 "发了一个根本不存在的管道编号，说明在改游戏数据。"));
-            list.Add(Toggle("抓强迫别人爬管道", cfg.VentForceOther,
+            list.Add(Toggle("强制他人离开通风管", cfg.VentForceOther,
                 "用漏洞让别人被强行拉进管道。"));
-            list.Add(Toggle("抓滑索滥用", cfg.ZiplineAbuse,
+            list.Add(Toggle("滑索异常使用", cfg.ZiplineAbuse,
                 "强行滑索，或者开会的时候滑索。"));
-            list.Add(Toggle("抓开会时爬管道", cfg.VentDuringMeeting,
+            list.Add(Toggle("会议期间使用通风管", cfg.VentDuringMeeting,
                 "开会期间所有人都被定在会议桌，这时候爬不了。"));
-            list.Add(Number("爬管道允许离多远", cfg.VentDistanceTolerance, 0.5f, 0.5f, 10f,
+            list.Add(Number("通风管距离容差", cfg.VentDistanceTolerance, 0.5f, 0.5f, 10f,
                 "离管道口这么远之内算正常使用。太严格会误判站在旁边的人。"));
-            list.Add(Toggle("抓数据包刷屏", cfg.RpcFloodDetection,
+            list.Add(Toggle("RPC 洪水检测", cfg.RpcFloodDetection,
                 "有人疯狂发数据包会让全房卡顿。"));
-            list.Add(Number("10 秒最多几次数据包", cfg.RpcRateLimit, 5f, 5f, 200f,
+            list.Add(Number("RPC 频率上限", cfg.RpcRateLimit, 5f, 5f, 200f,
                 "网络差的房间可能会误判，遇到误报就往上调。", true));
-            list.Add(Toggle("抓瞬移式位置同步", cfg.SnapRateDetection,
+            list.Add(Toggle("异常位置同步检测", cfg.SnapRateDetection,
                 "反复强制同步位置，是瞬移挂的典型做法。"));
-            list.Add(Number("10 秒最多几次同步", cfg.SnapRateLimit, 1f, 1f, 40f,
+            list.Add(Number("位置同步上限", cfg.SnapRateLimit, 1f, 1f, 40f,
                 "正常对局几乎不会出现连续的位置强制同步。", true));
-            list.Add(Toggle("抓开局乱开会", cfg.BlockEarlyMeeting,
+            list.Add(Toggle("开局误报检测", cfg.BlockEarlyMeeting,
                 "开局几秒内疯狂开会举报的，通常是在刷屏或者想破坏游戏。"));
-            list.Add(Number("开局后几秒内不许开会", cfg.EarlyMeetingGrace, 1f, 0f, 60f,
+            list.Add(Number("开局保护期", cfg.EarlyMeetingGrace, 1f, 0f, 60f,
                 "这段时间内开会举报会被拦下来。"));
-            list.Add(Toggle("抓超大数据包", cfg.OversizedPacketCheck,
+            list.Add(Toggle("超大包检测", cfg.OversizedPacketCheck,
                 "异常大的数据包，可能是想拖垮所有人。"));
             return list;
         }
@@ -983,7 +1058,7 @@ namespace ApexCheatEnder.UI
         /// 「记录与工具」页。
         ///
         /// **主体是「谁被检测了、几次、犯了什么」** —— 这是最该一眼看到的信息。
-        /// 原来这页塞了 18 行「分组映射」之类的配置，把真正要看的东西埋了。
+        /// 该页此前包含 18 行「分组映射」等配置项，淹没了主要信息。
         /// 现在按「检测汇总 → 历史事件 → 工具 → 分组映射」排，重要程度递减。
         /// </summary>
         private static List<SettingRow> BuildToolsPage(AntiCheatConfig cfg)
@@ -1021,7 +1096,7 @@ namespace ApexCheatEnder.UI
                     foreach (var e in v.Evidence)
                         counts[e.Kind] = counts.TryGetValue(e.Kind, out var c) ? c + 1 : 1;
 
-                    // 最近一条证据的原文 —— 悬停时在底部描述栏显示，就是「犯了什么」
+                    // 最近一条证据原文 —— 悬停时在底部描述栏显示，即「命中内容」
                     var latest = v.Evidence[v.Evidence.Count - 1].Detail;
 
                     list.Add(Info(v.Name,
@@ -1087,7 +1162,7 @@ namespace ApexCheatEnder.UI
 
             // ================= 工具 =================
             var presets = new[] { "保守", "标准", "严格" };
-            list.Add(Action("规则预设",
+            list.Add(Action("阈值预设",
                 "切换并应用阈值；自动踢人设置保持原样。",
                 () =>
                 {
@@ -1114,35 +1189,24 @@ namespace ApexCheatEnder.UI
                 () => { _exportStatus = AntiCheatRuntime.ExportDiagnostics(); },
                 () => _exportStatus));
 
-            list.Add(Info("性能",
+            list.Add(Info("性能探针",
                 "低频采样，只在本地显示。",
                 () => $"{AntiCheatRuntime.CurrentFps:F0} FPS"));
 
-            list.Add(Toggle("重复聊天本地提示", cfg.ShowRepeatedChatNotice,
+            list.Add(Toggle("重复消息提示", cfg.ShowRepeatedChatNotice,
                 "默认关闭；按发送者计数，10秒冷却，不计作弊、不踢人。"));
-            list.Add(Number("重复几次才提示", cfg.RepeatedChatThreshold, 1f, 3f, 10f,
+            list.Add(Number("重复确认次数", cfg.RepeatedChatThreshold, 1f, 3f, 10f,
                 "同一发送者10秒内连续发送相同消息的次数。", true));
 
-            // ================= 分组映射（配置，放最后） =================
+            // ================= 分组映射 =================
+            //
+            // 原来这里把**每一条规则**都列成一行（40 多行），每条还带一句说明 ——
+            // 一屏塞不下、翻半天看不到别的，而实际上几乎没人会去改。
+            // 现仅保留一行提示：默认分组已足够，如需调整请修改配置文件。
             list.Add(Info("规则分组",
-                "给每条规则指定所属分组，只影响上面历史事件的分类过滤。",
-                () => "点击切换"));
-
-            foreach (ViolationKind kind in Enum.GetValues(typeof(ViolationKind)))
-            {
-                var rule = kind;
-                list.Add(Action(RuleHintOf(rule) == null ? rule.ToString() : rule.ToString(),
-                    "点击依次切换分组并保存；仅影响历史分类。",
-                    () =>
-                    {
-                        cfg.RuleGroupMapping.Value = RuleGroups.Cycle(rule, cfg.RuleGroupMapping.Value);
-                        _historyPage = 0;
-                        AntiCheatRuntime.ApplyConfigChange();
-                        FlashSaved();
-                        BuildRows(_currentPage);
-                    },
-                    () => RuleGroups.Resolve(rule, cfg.RuleGroupMapping.Value)));
-            }
+                "给每条规则指定所属分组，只影响「历史事件」的分类过滤，不影响检测和处置。"
+                + "默认分组已经够用；要调整请改配置文件里的 RuleGroupMapping。",
+                () => RuleGroups.Names.Length + " 个分组"));
 
             return list;
         }
@@ -1188,6 +1252,8 @@ namespace ApexCheatEnder.UI
                 case ViolationKind.VentDuringMeeting: return "会议期间使用了通风管。";
                 case ViolationKind.VentForceOther: return "非房主强制把他人踢出通风管。";
                 case ViolationKind.ZiplineAbuse: return "滑索使用时机非法或坐标越界。";
+                // 名单层
+                case ViolationKind.BannedPlayer: return "命中内置封禁名单（按好友码 / 平台 ID 匹配，不是名字）。";
                 // 网络层
                 case ViolationKind.InvalidRpc: return "收到参数非法的 RPC 调用。";
                 case ViolationKind.StateDesync: return "上报状态与权威状态长期不一致。";
@@ -1377,11 +1443,22 @@ namespace ApexCheatEnder.UI
         private static void ClampWindow()
         {
             var scale = Mathf.Min(1f, Mathf.Min(Screen.width / WindowWidth, Screen.height / WindowHeight));
-            _windowRect.localScale = new Vector3(scale, scale, 1f);
+
+            // 同上：RectTransform 赋值必然标脏，没变就别写。
+            if (!Mathf.Approximately(scale, _appliedWindowScale))
+            {
+                _appliedWindowScale = scale;
+                _windowRect.localScale = new Vector3(scale, scale, 1f);
+            }
+
             var x = Mathf.Max(0f, (Screen.width - WindowWidth * scale) / 2f);
             var y = Mathf.Max(0f, (Screen.height - WindowHeight * scale) / 2f);
             var p = _windowRect.anchoredPosition;
-            _windowRect.anchoredPosition = new Vector2(Mathf.Clamp(p.x, -x, x), Mathf.Clamp(p.y, -y, y));
+            var target = new Vector2(Mathf.Clamp(p.x, -x, x), Mathf.Clamp(p.y, -y, y));
+            if ((target - p).sqrMagnitude < 0.0001f) return;
+
+            _appliedWindowPos = target;
+            _windowRect.anchoredPosition = target;
         }
 
         /// <summary>
@@ -1548,13 +1625,31 @@ namespace ApexCheatEnder.UI
             _scrollOffset = Mathf.Clamp(_scrollOffset, 0f, max);
         }
 
+        /// <summary>
+        /// 应用滚动偏移。
+        ///
+        /// **值没变就绝不写 RectTransform。**
+        /// Unity 里给 RectTransform 赋值一定会标脏，进而触发**整个 Canvas 重新生成网格**。
+        /// 设置页有数百个元素，每帧重建即导致 UI 严重卡顿 ——
+        /// 游戏逻辑本身未受影响，仅本模组 UI 空转。
+        /// </summary>
         private static void ApplyScroll()
         {
             if (_contentArea == null) return;
             var max = SettingsLayout.MaxScroll(_contentHeight, _viewportHeight);
             _scrollOffset = Mathf.Clamp(_scrollOffset, 0f, max);
+
+            if (Mathf.Approximately(_scrollOffset, _appliedScroll)) return;
+            _appliedScroll = _scrollOffset;
             _contentArea.anchoredPosition = new Vector2(0f, _scrollOffset);
         }
+
+        /// <summary>上一次真正写进 RectTransform 的滚动值，用于跳过无变化的写入。</summary>
+        private static float _appliedScroll = float.NaN;
+
+        /// <summary>上一次真正写进去的窗口缩放/位置，用于跳过无变化的写入。</summary>
+        private static float _appliedWindowScale = float.NaN;
+        private static Vector2 _appliedWindowPos = new Vector2(float.NaN, float.NaN);
 
         /// <summary>鼠标是否落在滚动视口内。行命中测试必须先过这一关，
         /// 否则被裁剪掉（滚出视口）的行仍可能在屏幕外的位置被点到。</summary>
@@ -1567,7 +1662,13 @@ namespace ApexCheatEnder.UI
         {
             if (_footerText == null) return;
 
-            if (Time.time < _savedFlashUntil)
+            // 文本内容不变就不写 —— 虽然 Unity 的 Text.text setter 自带相等判断，
+            // 但每帧拼一次字符串再比一次毫无意义，这里直接按状态短路。
+            var flashing = Time.time < _savedFlashUntil;
+            if (flashing == _footerFlashing) return;
+            _footerFlashing = flashing;
+
+            if (flashing)
             {
                 _footerText.text = "已保存 · 立刻生效，不用重启";
                 _footerText.color = AceTheme.Success;
@@ -1578,6 +1679,9 @@ namespace ApexCheatEnder.UI
             _footerText.text = "改动会立即保存并生效。配置文件在 BepInEx/config/apex.cheat.ender.cfg，"
                              + "用记事本改完保存也会自动生效。";
         }
+
+        /// <summary>上一次刷新时是否处于「已保存」闪烁态，用于跳过无变化的写入。</summary>
+        private static bool _footerFlashing = true;
 
         private static bool HandleSlider()
         {
@@ -1609,7 +1713,7 @@ namespace ApexCheatEnder.UI
         private static void HandleClick()
         {
             // 改成「按下记录 + 松开触发」：
-            // 若直接用 GetMouseButtonDown，用户想按住拖拽滚动时会顺带把行上的开关点掉。
+            // 若直接使用 GetMouseButtonDown，用户按住拖拽滚动时会误触行内开关。
             if (Input.GetMouseButtonDown(0))
             {
                 _pressPos = Input.mousePosition;

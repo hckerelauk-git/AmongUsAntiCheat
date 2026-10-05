@@ -122,7 +122,7 @@ namespace ApexCheatEnder.UI
                 StatsHud.Tick();
 
                 // 名字标记由帧驱动刷新：游戏的 PlayerControl 没有 Update 方法，
-                // 挂在上面会直接挂载失败，标记就永远不生效。
+                // 挂载在其上会直接失败，标记始终不生效。
                 //
                 // 不再用「设置窗口是否打开」当条件：游戏自己会不断重写 nameText，
                 // 刷新一停标记就被覆盖掉了，别人看你的标记会莫名消失。

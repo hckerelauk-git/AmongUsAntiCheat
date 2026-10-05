@@ -83,7 +83,7 @@ namespace ApexCheatEnder.Core
         /// <summary>
         /// 模组自报家门时登记它的 GUID（Amethyst / ACE 互认包）。
         ///
-        /// 库里查得到就用名字，查不到就直接显示 GUID 原文 —— 用户明确要求的行为。
+        /// 库中可查到则显示名称，查不到则显示 GUID 原文 —— 用户明确要求的行为。
         /// </summary>
         public static void Announce(int playerId, string guid)
         {

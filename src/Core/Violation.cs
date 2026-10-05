@@ -82,6 +82,15 @@ namespace ApexCheatEnder.Core
         /// <summary>滑索使用异常（非法时机或越界）。</summary>
         ZiplineAbuse,
 
+        // ---------- 名单层 ----------
+        /// <summary>
+        /// 命中内置封禁名单。
+        ///
+        /// 与其它类型不同：这不是「检测到的行为」，而是**事先认定的人**。
+        /// 命中依据是好友码 / 平台 ID（改名甩不掉），不是名字。
+        /// </summary>
+        BannedPlayer,
+
         // ---------- 网络层 ----------
         /// <summary>收到参数非法的 RPC 调用。</summary>
         InvalidRpc,

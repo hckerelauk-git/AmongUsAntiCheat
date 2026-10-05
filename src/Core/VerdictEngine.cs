@@ -11,7 +11,7 @@ namespace ApexCheatEnder.Core
     ///
     /// 模型是「规则命中」，不计分：
     /// 每条规则命中即记一笔，命中确定性规则立即定为高危，
-    /// 不存在累加与衰减——确定性的东西不该被时间洗掉。
+    /// 不设累加与衰减 —— 确定性证据不应随时间衰减。
     ///
     /// 注意：PlayerVerdict 已拆到同命名空间的 PlayerVerdict.cs。
     /// 拆分的理由是它本身不依赖任何外部类型，而本类需要 BepInEx ——
@@ -19,6 +19,18 @@ namespace ApexCheatEnder.Core
     /// </summary>
     public sealed class VerdictEngine
     {
+        /// <summary>
+        /// 按玩家号取身份串（好友码 / 平台 ID）。
+        /// 核心层不引用 GameBridge，由运行时注入；未注入时返回空串。
+        /// </summary>
+        public static System.Func<int, string> DescribeIdentity;
+
+        private static string IdentityOf(int playerId)
+        {
+            try { return DescribeIdentity?.Invoke(playerId) ?? string.Empty; }
+            catch { return string.Empty; }
+        }
+
         private readonly AntiCheatConfig _cfg;
         private readonly ManualLogSource _log;
         private readonly Dictionary<int, PlayerVerdict> _verdicts = new Dictionary<int, PlayerVerdict>(16);
@@ -80,12 +92,16 @@ namespace ApexCheatEnder.Core
             var verdict = GetOrCreate(violation.PlayerId, violation.PlayerName);
             verdict.AddEvidence(violation);
 
+            // 身份（好友码 / 平台 ID）：**命中了却拿不到可封禁的标识，等于白抓。**
+            // 现场就是这样：日志里只有「777(6)」，玩家号每局重分配，事后根本对不上人。
+            var identity = IdentityOf(verdict.PlayerId);
+
             _log.LogWarning(
-                $"[规则命中] {verdict.Name}({verdict.PlayerId}) 命中 {violation.Kind}，本局累计 {verdict.EvidenceCount} 条 | {violation.Detail}");
+                $"[规则命中] {verdict.Name}({verdict.PlayerId}){identity} 命中 {violation.Kind}，本局累计 {verdict.EvidenceCount} 条 | {violation.Detail}");
 
             // 落盘留证（受「记录作弊判定」开关控制）
             HistoryLog.RecordViolation(verdict.Name, verdict.PlayerId,
-                violation.Kind.ToString(), violation.Detail);
+                violation.Kind.ToString(), violation.Detail, identity);
 
             Evaluate(verdict, now);
         }

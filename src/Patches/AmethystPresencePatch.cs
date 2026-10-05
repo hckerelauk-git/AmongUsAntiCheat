@@ -32,15 +32,20 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerPhysics), "HandleRpc");
 
+        /// <summary>
+        /// **强类型参数，不能用 <c>object[] __args</c>。**
+        /// PlayerPhysics.HandleRpc 是移动同步的必经之路，频率比 PlayerControl 那条还高。
+        /// 用 <c>__args</c> 等于每个移动包都白送一次数组分配 + 装箱。
+        /// </summary>
         [HarmonyPriority(Priority.High)]
-        private static bool Prefix(PlayerPhysics __instance, object[] __args)
+        private static bool Prefix(PlayerPhysics __instance,
+            [HarmonyArgument(0)] byte callId,
+            [HarmonyArgument(1)] MessageReader reader)
         {
             try
             {
-                var callId = ExtractCallId(__args);
                 if (callId == AmethystPresence.AmethystCallId)
                 {
-                    var reader = ExtractReader(__args);
                     var sender = __instance?.myPlayer;
                     if (reader != null)
                         AmethystPresence.TryAccept(callId, reader, sender);
@@ -52,25 +57,6 @@ namespace ApexCheatEnder.Patches
             }
 
             return true;
-        }
-
-        private static byte ExtractCallId(object[] args)
-        {
-            if (args == null) return 0;
-            foreach (var arg in args)
-            {
-                if (arg is byte b) return b;
-                if (arg is sbyte sb) return (byte)sb;
-            }
-            return 0;
-        }
-
-        private static MessageReader ExtractReader(object[] args)
-        {
-            if (args == null) return null;
-            foreach (var arg in args)
-                if (arg is MessageReader reader) return reader;
-            return null;
         }
     }
 }

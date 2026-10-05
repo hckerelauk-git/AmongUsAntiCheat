@@ -13,6 +13,27 @@ namespace ApexCheatEnder.Tests
     /// </summary>
     internal static class Program
     {
+        /// <summary>
+        /// 去掉注释行再比对。
+        ///
+        /// 有些断言是「不许出现某种写法」，而**注释里正好在解释这种写法为什么不能用** ——
+        /// 不剥注释就会把「解释坏写法」判成「用了坏写法」。这个坑刚踩过一次。
+        /// </summary>
+        private static string StripComments(string source)
+        {
+            var sb = new System.Text.StringBuilder(source.Length);
+            foreach (var line in source.Split('\n'))
+            {
+                var t = line.TrimStart();
+                if (t.StartsWith("//", StringComparison.Ordinal) ||
+                    t.StartsWith("/*", StringComparison.Ordinal) ||
+                    t.StartsWith("*", StringComparison.Ordinal))
+                    continue;
+                sb.Append(line).Append('\n');
+            }
+            return sb.ToString();
+        }
+
         private static int _passed;
         private static int _failed;
         private static readonly List<string> Failures = new List<string>();
@@ -36,6 +57,485 @@ namespace ApexCheatEnder.Tests
             Run("UI：短页无滚动", () => Eq(0f, SettingsLayout.MaxScroll(100f, 300f), "短页"));
             Run("UI：长页末行可达", () => Eq(200f, SettingsLayout.MaxScroll(500f, 300f), "长页"));
             Run("UI：行为子页全部选项唯一覆盖", TestSettingsGroups);
+            Run("UI：子标签表必须自洽且覆盖全部分组", TestSubTabCoverage);
+
+            // ---------- 封禁名单 ----------
+            Run("封禁名单：好友码格式校验", () =>
+            {
+                True(BanListDb.IsValidFriendCode("sloehind#4553"), "标准格式必须通过");
+                True(BanListDb.IsValidFriendCode("a#0000"), "最短名字也要通过");
+                True(!BanListDb.IsValidFriendCode("seniorhive8445"), "没有 # 的不是好友码");
+                True(!BanListDb.IsValidFriendCode("#4553"), "# 前面必须有名字");
+                True(!BanListDb.IsValidFriendCode("abc#455"), "# 后必须正好四位");
+                True(!BanListDb.IsValidFriendCode("abc#45533"), "五位也不行");
+                True(!BanListDb.IsValidFriendCode("abc#45a3"), "# 后必须是数字");
+                True(!BanListDb.IsValidFriendCode(""), "空串不算");
+            });
+
+            Run("封禁名单：内置条目必须可定位", () =>
+            {
+                True(BanListDb.BuiltIn.Count > 0, "内置名单不能为空");
+                foreach (var e in BanListDb.BuiltIn)
+                {
+                    True(!string.IsNullOrWhiteSpace(e.Name), "每条都要有名字");
+                    True(!string.IsNullOrWhiteSpace(e.Reason), "每条都要写清楚为什么：" + e.Name);
+                    // 写了好友码就必须是合法格式 —— 写错一位就永远匹配不上，
+                    // 而且现场表现为「功能静默失效」，最难查
+                    if (!string.IsNullOrEmpty(e.Code))
+                        True(BanListDb.IsValidFriendCode(e.Code), "内置好友码格式必须合法：" + e.Code);
+                }
+            });
+
+            Run("封禁名单：按好友码命中，改名也甩不掉", () =>
+            {
+                True(BanListDb.Check("sloehind#4553", "", "随便改的名字", null, out var hit), "必须命中");
+                True(hit.Name == "sloehind", "命中的条目应为 sloehind，实际 " + hit.Name);
+                True(BanListDb.Check("SLOEHIND#4553", "", "x", null, out _), "大小写不敏感");
+                True(BanListDb.Check("linkfair#3286", "", "x", null, out _), "第二条也要命中");
+            });
+
+            Run("封禁名单：按平台 ID 命中", () =>
+            {
+                True(BanListDb.Check("", "seniorhive8445", "x", null, out var hit), "平台 ID 命中");
+                True(hit.Name == "B站星函星辰", "命中的条目应为 B站星函星辰，实际 " + hit.Name);
+            });
+
+            Run("封禁名单：有 ID 的条目绝不按名字匹配", () =>
+            {
+                // 「黑龙」有好友码，就只认码 —— 否则「黑龙王」「黑龙丶」全被误伤
+                True(!BanListDb.Check("", "", "黑龙", null, out _), "有好友码就不许按名字命中");
+                True(!BanListDb.Check("", "", "黑龙王", null, out _), "更不许模糊命中");
+                True(!BanListDb.Check("", "", "sloehind", null, out _), "名字对但没码，不命中");
+                // 「鸟（繁体）」没有 ID，只能按名字
+                True(BanListDb.Check("", "", "鸟（繁体）", null, out _), "无 ID 条目按名字命中");
+                True(BanListDb.Check("", "", "鸟(繁体)", null, out _), "全角半角括号必须等价");
+                True(!BanListDb.Check("", "", "小鸟", null, out _), "不能宽到误伤「小鸟」");
+            });
+
+            Run("封禁名单：自定义条目解析", () =>
+            {
+                var list = BanListDb.Parse("张三|zhangsan#1234||炸房;李四||puid-abc|刷屏");
+                Eq(2, list.Count, "两条");
+                True(list[0].Code == "zhangsan#1234", "好友码应为 zhangsan#1234，实际 " + list[0].Code);
+                True(list[1].Puid == "puid-abc", "平台 ID 应为 puid-abc，实际 " + list[1].Puid);
+                True(BanListDb.Check("zhangsan#1234", "", "换了名字", list, out _), "自定义条目要生效");
+                Eq(0, BanListDb.Parse("").Count, "空串解析出空表");
+                Eq(0, BanListDb.Parse(";;;;").Count, "全分隔符也解析出空表");
+            });
+
+            Run("封禁名单：序列化往返不丢信息", () =>            {
+                var list = BanListDb.Parse("张三|zhangsan#1234|puid1|炸房");
+                var round = BanListDb.Parse(BanListDb.Format(list));
+                Eq(1, round.Count, "条数不变");
+                True(round[0].Code == "zhangsan#1234", "好友码往返后变了：" + round[0].Code);
+                True(round[0].Puid == "puid1", "平台 ID 往返后变了：" + round[0].Puid);
+                True(round[0].Reason == "炸房", "备注往返后变了：" + round[0].Reason);
+            });
+
+            Run("封禁名单：名字里的分隔符不得破坏整份名单", () =>
+            {
+                // 备注里带 | 或 ; 会把后面的条目串味 —— 必须被替换掉
+                var list = new List<BanEntry>
+                {
+                    new BanEntry { Name = "张三", Code = "zhangsan#1234", Reason = "炸房|很恶劣;还骂人" },
+                };
+                var round = BanListDb.Parse(BanListDb.Format(list));
+                Eq(1, round.Count, "分隔符必须被清理，不能裂成多条");
+                True(round[0].Code == "zhangsan#1234", "好友码要保住，实际 " + round[0].Code);
+            });
+
+            Run("封禁名单：接入运行时的硬性约束", () =>
+            {                var runtime = System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/AntiCheatRuntime.cs")));
+
+                // 名单里有「鸟（繁体）」这种只有名字的条目，不跳过自己就可能把自己踢了
+                True(runtime.Contains("GameBridge.GetLocalPlayer()) continue"), "必须跳过本地玩家");
+                // 检查每秒跑一次，没有去重表会每秒提交一条重复证据，通知直接刷屏
+                True(runtime.Contains("BanReported.Contains(id)"), "必须按玩家去重");
+                True(runtime.Contains("BanReported.Clear()"), "去重表必须每局清空，否则跨局残留");
+                True(runtime.Contains("Config.EnableBanList.Value"), "必须受开关控制");
+                // 走现有证据链，不另开一套处置逻辑
+                True(runtime.Contains("ViolationKind.BannedPlayer") && runtime.Contains("Severity.Critical"),
+                    "命中必须记为确定级证据，处置沿用现有设置");
+            });
+
+            // ---------- 在线封禁名单 ----------
+            Run("在线名单：解析端点返回的真实结构", () =>
+            {
+                // 样本取自 https://api2.elauk.top/acban 的实际返回，
+                // 用来把接口契约锁住 —— 端点改字段名时这里会先失败。
+                const string sample = "{\"updatedAt\":1791172311,\"count\":3,\"bans\":["
+                    + "{\"name\":\"示例玩家 Gamma\",\"friendCode\":\"CCCC3333\","
+                    + "\"puid\":\"0000000000000000000000000000c3\",\"reason\":\"崩溃攻击\","
+                    + "\"source\":\"ACE\",\"bannedAt\":1790955660,\"evidence\":\"\"},"
+                    + "{\"name\":\"示例玩家 Beta\",\"friendCode\":\"BBBB2222\","
+                    + "\"puid\":\"0000000000000000000000000000b2\",\"reason\":\"透视插件\","
+                    + "\"source\":\"Amethyst\",\"bannedAt\":1790766120,\"evidence\":\"\"}]}";
+
+                True(BanListRemote.Parse(sample, out var list, out var updatedAt, out var err),
+                    "真实结构必须能解析，错误：" + err);
+                Eq(2, list.Count, "条数");
+                Eq(1791172311L, updatedAt, "数据时间");
+                True(list[0].Name == "示例玩家 Gamma", "名字，实际 " + list[0].Name);
+                True(list[0].Code == "CCCC3333", "好友码，实际 " + list[0].Code);
+                True(list[0].Puid == "0000000000000000000000000000c3", "平台 ID");
+                True(list[0].Reason.Contains("崩溃攻击") && list[0].Reason.Contains("ACE"),
+                    "理由要带上来源，实际 " + list[0].Reason);
+            });
+
+            Run("在线名单：坏数据不得污染整份名单", () =>
+            {
+                // 单条脏数据只跳过它自己，不能连累其他条目
+                const string mixed = "{\"bans\":["
+                    + "{\"name\":\"好的\",\"friendCode\":\"GOOD1234\"},"
+                    + "{\"name\":\"没有标识的\"},"
+                    + "{\"name\":\"也是好的\",\"puid\":\"puid-xyz\"}]}";
+                True(BanListRemote.Parse(mixed, out var list, out _, out _), "应解析成功");
+                Eq(2, list.Count, "缺标识的条目要被跳过");
+
+                // 整体结构不对 → 整批丢弃，绝不让坏数据覆盖已有名单
+                True(!BanListRemote.Parse("", out _, out _, out _), "空串要失败");
+                True(!BanListRemote.Parse("not json", out _, out _, out _), "非 JSON 要失败");
+                True(!BanListRemote.Parse("{\"count\":3}", out _, out _, out _), "缺 bans 要失败");
+                True(!BanListRemote.Parse("[]", out _, out _, out _), "顶层不是对象要失败");
+                True(!BanListRemote.Parse("{\"bans\":[{\"name\":\"无标识\"}]}", out _, out _, out _),
+                    "全部条目都不可用时视为失败，避免把已有名单清空");
+            });
+
+            Run("封禁名单：游戏内一键添加", () =>
+            {
+                // 抓到了却要手抄好友码去改配置文件，等于没抓到。
+                var added = BanListDb.AppendEntry("", "作弊者", "abc#1234", "", "手动封禁");
+                True(added.Contains("abc#1234"), "应写入好友码，实际 " + added);
+                True(added.Contains("作弊者"), "应写入名字");
+                // 注意：必须把解析后的条目传进去。传 null 只会查内置名单，
+                // 而这里要验证的是「刚加进去的条目生效了」。
+                var parsed = BanListDb.Parse(added);
+                True(BanListDb.Check("abc#1234", "", "换了名字", parsed, out _), "加完必须立刻能命中");
+
+                // 重复添加不生效 —— 否则配置串越加越长，用户还以为没生效
+                var again = BanListDb.AppendEntry(added, "作弊者", "ABC#1234", "", "重复");
+                True(again == added, "同标识不得重复添加（大小写不敏感）");
+
+                // 没有可匹配标识时原样返回：那种条目本来就会被忽略
+                True(BanListDb.AppendEntry("", "只有名字", "", "", "x") == "",
+                    "无好友码且无平台 ID 时不得写入");
+
+                // 追加不能破坏已有条目
+                var two = BanListDb.AppendEntry(added, "第二个", "", "puid-xyz", "手动封禁");
+                Eq(2, BanListDb.Parse(two).Count, "两条都要在");
+                var twoParsed = BanListDb.Parse(two);
+                True(BanListDb.Check("abc#1234", "", "x", twoParsed, out _), "旧条目仍要命中");
+                True(BanListDb.Check("", "puid-xyz", "x", twoParsed, out _), "新条目要命中");
+            });
+
+            Run("在线名单：好友码两种表示都要能匹配", () =>
+            {
+                var remote = new List<BanEntry>
+                {
+                    new BanEntry { Name = "端点条目", Code = "CCCC3333", Reason = "在线" },
+                };
+
+                // 游戏内 FriendCode 可能带名字前缀
+                True(BanListDb.Check("玩家名#CCCC3333", "", "x", null, remote, out _),
+                    "带前缀的好友码必须命中");
+                True(BanListDb.Check("CCCC3333", "", "x", null, remote, out _),
+                    "纯码必须命中");
+
+                // 但短码不做包含匹配 —— 否则会退化成子串碰撞
+                var shortCode = new List<BanEntry> { new BanEntry { Name = "短码", Code = "1234" } };
+                True(!BanListDb.Check("玩家名#1234", "", "x", null, shortCode, out _),
+                    "短码不得做包含匹配，宁可漏判也不误判");
+
+                // 在线名单优先级最高，命中时应报它而不是内置条目
+                True(BanListDb.Check("CCCC3333", "", "x", null, remote, out var hit), "应命中");
+                True(hit.Name == "端点条目", "应报在线名单条目，实际 " + hit.Name);
+            });
+
+            Run("主菜单：必须隐藏灰色遮罩与左侧分隔线", () =>
+            {
+                var art = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/UI/MainMenuArt.cs"))));
+
+                // MainUI/Tint 是覆盖右半屏的灰色半透明遮罩，子菜单打开时游戏会启用它。
+                // 定位它踩过坑：早期用 sprite.bounds.size × scale 算尺寸，
+                // 对九宫格精灵会算成 1.0x1.0，正好被「只列大尺寸渲染器」的过滤条件挡掉。
+                True(art.Contains("\"MainUI/Tint\""), "必须隐藏 MainUI/Tint（右侧灰色遮罩）");
+                // 高度为 0 的分隔线：一条灰线，用户明确要求去掉
+                True(art.Contains("Main Buttons/Divider"), "必须隐藏左侧按钮区的分隔线");
+                // 四个子菜单各有一条，只关一条的话切到别的子菜单又会冒出来
+                foreach (var menu in new[] { "GameModeButtons", "OnlineButtons", "EnterCodeButtons", "AccountButtons" })
+                    True(art.Contains(menu + "/Divider"), "必须隐藏 " + menu + " 的分隔线");
+
+                // 只关 enabled 会有一帧闪烁：游戏在自己的 Update 里把它重新启用，
+                // 而帧驱动按帧去重，谁先跑到算谁的。必须同时把 alpha 清零。
+                True(art.Contains("sr.color = Color.clear"), "必须同时把 alpha 清零，否则会闪一帧");
+                True(art.Contains("ClearedRenderers.Contains(sr)"), "清零的渲染器要纳入每帧重申");
+            });
+
+            Run("记录：命中必须带上可封禁的身份（好友码 / 平台 ID）", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+
+                // 现场问题：日志里只有「777(6)」，玩家号每局重新分配 ——
+                // 事后根本对不上人，抓到了也封不了。
+                var engine = StripComments(System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/VerdictEngine.cs")));
+                True(engine.Contains("DescribeIdentity"), "VerdictEngine 必须能取到身份");
+                True(engine.Contains("IdentityOf(verdict.PlayerId)"), "命中日志必须带上身份");
+
+                var history = StripComments(System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/HistoryLog.cs")));
+                True(history.Contains("string identity = null"), "落盘接口必须接受身份");
+                True(history.Contains("{identity} 命中"), "CheatHistory 必须写入身份");
+
+                var runtime = StripComments(System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/AntiCheatRuntime.cs")));
+                True(runtime.Contains("GetFriendCode(p)") && runtime.Contains("GetPuid(p)"),
+                    "身份必须同时取好友码与平台 ID");
+                // 「他开的是什么挂」—— 模组指纹要一起记下来，否则只有个名字没法判断
+                True(runtime.Contains("ModFingerprint.Of(id)"), "身份里必须带上模组指纹");
+            });
+
+            Run("配置：迁移表的目标键必须真实存在", () =>
+            {
+                // 踩过的坑：键名改了，但迁移表还指向旧名 ——
+                // 老配置会迁移到一个不存在的键，然后被当垃圾删掉，用户的设置静默丢失。
+                // 这类错误编译能过、测试也能过，只能靠全表校验兜住。
+                var cfg = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/Config/AntiCheatConfig.cs"))));
+
+                var consts = new Dictionary<string, string>();
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                    cfg, "const string ([A-Z]) = \"([^\"]+)\";"))
+                    consts[m.Groups[1].Value] = m.Groups[2].Value;
+
+                var bindings = new HashSet<string>();
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                    cfg, "cfg\\.Bind\\(([A-Z]),\\s*\"([^\"]+)\""))
+                    bindings.Add(consts[m.Groups[1].Value] + "/" + m.Groups[2].Value);
+
+                var checkedCount = 0;
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                    cfg, "\\(\"([^\"]+)\", \"([^\"]+)\", \"([^\"]+)\", \"([^\"]+)\"\\),"))
+                {
+                    var target = m.Groups[3].Value + "/" + m.Groups[4].Value;
+                    checkedCount++;
+                    True(bindings.Contains(target),
+                        "迁移目标键必须存在（否则用户设置会静默丢失）：" + target);
+                }
+
+                True(checkedCount > 50, "迁移表应被完整校验，实际校验 " + checkedCount + " 条");
+            });
+
+            Run("标记：判定结果必须标在头顶，不能只写日志", () =>
+            {
+                var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
+                var presence = StripComments(System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/AcePresence.cs")));
+                var tags = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/PresenceTags.cs"));
+
+                // 打游戏的时候没人会去翻日志 —— 当场唯一能看见的告警就是名字标记。
+                True(tags.Contains("HighRiskMark") && tags.Contains("SuspiciousMark"),
+                    "必须提供高危 / 可疑标记");
+                True(presence.Contains("RiskOf(id)"), "标记必须读取判定结果");
+                True(presence.Contains("BuildTags(isAce, isAmethyst, id, risk)"), "风险必须传进标记");
+                True(presence.Contains("PresenceTags.HighRiskNameHex"), "高危名字必须变色");
+
+                // 被判定过的玩家即使关掉「标记非模组玩家」也要标出来
+                True(presence.Contains("isVanilla && risk == RiskLevel.Normal"),
+                    "判定过的玩家不得被「非模组玩家标记」开关挡掉");
+                // 否则会出现「原本玩家 ⛔高危」这种自相矛盾的标记
+                True(presence.Contains("parts.Count == 0 && risk == RiskLevel.Normal"),
+                    "已有风险标记时不得再补「原本玩家」");
+            });
+
+            Run("RPC 洪水：加载/大厅阶段必须有更宽松的阈值", () =>
+            {
+                var guard = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/Core/Rpc/RpcFloodGuard.cs"))));
+
+                // 现场：三人同时在「加载/大厅」被判 61 个 RPC（阈值 60），
+                // 超出只有 1~4 个，而且三人速率与类型完全相同 —— 那是模组的周期性广播，
+                // 不是洪水攻击。大厅阶段本来就有大量合法的位置/外观/准备状态同步。
+                True(guard.Contains("(loading ? 2 : 1)"), "加载/大厅阶段阈值必须放宽");
+            });
+
+            Run("判定：同一规则重复命中必须升级为高危", () =>
+            {
+                // 实测：一个人连续超速 8 次、最高 1.77 倍速，却因为 SpeedHack 的严重度
+                // 是 High 而不是 Critical，永远停在「可疑」，升不到高危。
+                var v = new PlayerVerdict { PlayerId = 1, Name = "测试" };
+
+                for (var i = 1; i < PlayerVerdict.RepeatConfirmCount; i++)
+                {
+                    v.AddEvidence(new Violation(ViolationKind.SpeedHack, Severity.High, 1, "测试", i, "超速"));
+                    True(v.EvaluateLevel() == RiskLevel.Suspicious,
+                        "重复 " + i + " 次（未达阈值）应仍为可疑");
+                }
+
+                v.AddEvidence(new Violation(ViolationKind.SpeedHack, Severity.High, 1, "测试", 9f, "超速"));
+                True(v.EvaluateLevel() == RiskLevel.HighRisk,
+                    "同一条规则重复命中达到阈值必须升级为高危");
+
+                // 不同规则各命中一次不能触发 —— 那才叫分数累计，本项目不做
+                var spread = new PlayerVerdict { PlayerId = 2, Name = "分散" };
+                var kinds = new[] { ViolationKind.Teleport, ViolationKind.SpeedHack, ViolationKind.ChatFlood,
+                                    ViolationKind.IllegalVent, ViolationKind.TaskTooFast, ViolationKind.WallClip };
+                for (var i = 0; i < kinds.Length; i++)
+                    spread.AddEvidence(new Violation(kinds[i], Severity.High, 2, "分散", i, "各一条"));
+                True(spread.EvaluateLevel() == RiskLevel.Suspicious,
+                    "不同规则各命中一次不得升级（那是分数累计）");
+
+                v.Reset();
+                True(v.EvaluateLevel() == RiskLevel.Normal, "Reset 必须清空重复计数");
+            });
+
+            Run("采样：场景级传送必须整批豁免", () =>
+            {
+                var runtime = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/AntiCheatRuntime.cs"))));
+
+                // 会议开始会把所有人一起传送到会议桌，而且比 inMeeting 状态早一帧 ——
+                // 实测诊断：所有状态标志为 0，紧接着下一行才是「会议开始」。
+                // 逐人判定看不出这种情况，必须在批次层面统计。
+                True(runtime.Contains("bigMovers"), "必须统计本帧大位移人数");
+                True(runtime.Contains("bigMovers >= 2"), "两人及以上同时大位移视为场景传送");
+                True(runtime.Contains("t.LastLegalTeleportTime = now"), "场景传送必须整批开豁免窗口");
+            });
+
+            Run("主菜单：顶栏透明化不得被其它逻辑短路", () =>
+            {
+                var art = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/UI/MainMenuArt.cs"))));
+
+                // 回归：ClearTopBar 曾用 `ClearedRenderers.Count >= 1` 当「已处理」守卫，
+                // 而隐藏原版图层也往同一个列表里加、且先执行 ——
+                // 列表立刻被填满，守卫命中，顶栏再也不会被透明化。
+                True(!art.Contains("ClearedRenderers.Count >= TransparentSpritePaths.Length"),
+                    "不得用共用列表的长度当「已处理」守卫");
+                True(art.Contains("_topBarCleared"), "顶栏必须有独立的完成标志");
+                True(art.Contains("if (_topBarCleared) return;"), "守卫必须读独立标志");
+                True(art.Contains("_topBarCleared = false;"), "菜单重建时必须重置，否则换局后不再生效");
+            });
+
+            Run("启动动画：必须使用内嵌图标", () =>
+            {
+                var splash = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/UI/DesktopSplash.cs"))));
+
+                // 窗口是纯 GDI 的，GDI 画不了 PNG，必须借 GDI+ 解一次
+                True(splash.Contains("GdiplusStartup"), "必须初始化 GDI+");
+                True(splash.Contains("GdipCreateBitmapFromFile"), "必须从文件加载 PNG");
+                True(splash.Contains("GdipDrawImageRectI"), "必须把图标绘制到徽标位置");
+                True(splash.Contains("ApexCheatEnder.Icon.png"), "必须读取内嵌图标资源");
+                True(splash.Contains("DrawIconInto"), "必须优先画图标");
+                // 任何一步失败都要能回退，不能让动画整体失效
+                True(splash.Contains("GdiplusShutdown") && splash.Contains("GdipDisposeImage"),
+                    "GDI+ 资源必须释放，否则句柄泄漏");
+            });
+
+            Run("在线名单：必须直连，不走系统代理", () =>
+            {
+                var remote = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/Core/BanListRemote.cs"))));
+
+                // 实测走代理会超时：端点在国内（腾讯云），经本地代理绕一圈反而连不上，
+                // 769 字节的响应 10 秒超时。
+                True(remote.Contains("UseProxy = false"), "必须显式关闭代理");
+            });
+
+            Run("在线名单：必须在进入对局之前就开始拉取", () =>
+            {
+                // 换行符先归一化 —— 文件在 Windows 下是 CRLF，直接找 "\n" 会失配
+                var runtime = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/AntiCheatRuntime.cs"))))
+                    .Replace("\r\n", "\n");
+
+                // 放在 CheckBanList 里会导致只有进对局才拉取，而玩家通常先进大厅再进房，
+                // 名单永远来不及准备好 —— 表现为「功能未生效」，日志里却一条错都没有。
+                var iTick = runtime.IndexOf("BanListRemote.Tick(now,", StringComparison.Ordinal);
+                var iReturn = runtime.IndexOf("if (!inGame)\n", StringComparison.Ordinal);
+                True(iTick >= 0, "必须调用 BanListRemote.Tick");
+                True(iReturn > 0, "应能定位「不在对局中」的提前返回");
+                True(iTick < iReturn, "拉取必须发生在「不在对局中」提前返回之前");
+
+                // 日志钩子必须在任何状态下都会安装，否则失败信息完全不可见
+                var iHook = runtime.IndexOf("BanListRemote.LogInfo = m =>", StringComparison.Ordinal);
+                True(iHook >= 0 && iHook < iReturn, "日志钩子必须在提前返回之前安装");
+            });
+
+            // ---------- 性能：热路径不得产生垃圾 ----------
+            Run("性能：每个 RPC / 每个网络包的补丁不得用 object[] __args", () =>
+            {
+                // Harmony 的 object[] __args 会让**每次调用**都新建数组并装箱所有参数。
+                // 挂在 HandleRpc / HandleGameData 这种每包都跑的方法上，
+                // 就是持续不断的垃圾，攒够了触发 GC —— 现场表现就是周期性掉帧。
+                // 必须用 [HarmonyArgument(n)] 强类型参数，直接读 IL 实参，零分配。
+                var hot = new[]
+                {
+                    "Patches/AcePresencePatch.cs",
+                    "Patches/AmethystPresencePatch.cs",
+                    "Patches/RpcGuardPatches.cs",
+                    "Patches/GameplayPatches.cs",
+                    "Patches/PlayerActionPatches.cs",
+                };
+
+                foreach (var file in hot)
+                {
+                    var src = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                        System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src", file))));
+                    True(!src.Contains("object[] __args"),
+                        file + " 不得用 object[] __args（每次调用都建数组 + 装箱）");
+                    True(src.Contains("[HarmonyArgument("),
+                        file + " 必须用 [HarmonyArgument(n)] 强类型参数");
+                }
+            });
+
+            Run("性能：超大数据包检测不得再用反射读 Length", () =>
+            {
+                var gameplay = StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/Patches/GameplayPatches.cs"))));
+
+                // HandleGameData 每个网络包都跑，而这项检测默认是开的。
+                // 原来那里是 GetType().Name 字符串比较 + PropertyInfo.GetValue 反射取值。
+                True(!gameplay.Contains("PropertyInfo"), "不得再用反射读 MessageReader.Length");
+                True(!gameplay.Contains("_lengthProp"), "反射缓存字段应已移除");
+                True(gameplay.Contains("reader.Length"), "必须直接读 MessageReader.Length");
+            });
+
+            Run("性能：名单检查每人每局只查一次", () =>
+            {                var runtime = System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src/AntiCheatRuntime.cs")));
+
+                // 每秒给全房每人做一次字符串归一化 = 每秒几十次分配，纯浪费。
+                // 好友码不会中途变，查过就记下来。
+                True(runtime.Contains("BanChecked"), "必须有「已查过」集合");
+                True(runtime.Contains("BanChecked.Clear()"), "每局必须清空");
+                True(runtime.Contains("BanChecked.Add(id)"), "必须在跳过判断之前标记已查");
+            });
+
+            Run("性能：UI 不得每帧无条件写 RectTransform", () =>
+            {                // Unity 里给 RectTransform 赋值**一定标脏**，进而触发整个 Canvas 重新生成网格。
+                // 设置页有几百个元素，每帧重建一次 = 「UI 卡成幻灯片、游戏却一点不卡」。
+                // 所以每一处写入都必须先比较、没变就跳过。
+                string Read(string rel) => StripComments(System.IO.File.ReadAllText(System.IO.Path.GetFullPath(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../src", rel))));
+
+                var settings = Read("UI/SettingsWindow.cs");
+                True(settings.Contains("_appliedScroll") && settings.Contains("Mathf.Approximately(_scrollOffset, _appliedScroll)"),
+                    "滚动必须先比较再写");
+                True(settings.Contains("_appliedWindowScale") && settings.Contains("Mathf.Approximately(scale, _appliedWindowScale)"),
+                    "窗口缩放必须先比较再写");
+                True(settings.Contains("(target - p).sqrMagnitude"),
+                    "窗口位置必须先比较再写");
+                True(settings.Contains("_footerFlashing"),
+                    "页脚文案必须先比较状态再写");
+
+                var notice = Read("UI/NotificationPanel.cs");
+                True(notice.Contains("sqrMagnitude"),
+                    "通知槽位重排必须先比较再写");
+
+                var chat = Read("UI/ChatAbuseNotice.cs");
+                True(chat.Contains("_root != null && _root.activeSelf"),
+                    "隐藏前必须先判断当前是否已隐藏");
+            });
             Run("UI：数字行滑条占独立右侧区域", () =>
             {
                 var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(
@@ -43,7 +543,11 @@ namespace ApexCheatEnder.Tests
                 var ui = System.IO.File.ReadAllText(path);
                 True(ui.Contains("SliderHit"), "数字行必须有独立滑条区域");
                 // 说明文字不再常驻行内，否则行高又会被撑回去
-                True(!ui.Contains("\"RowHint\""), "行内不得再常驻说明文字");
+                // 说明必须常驻在行内。之前挪到底部栏、只在悬停时显示，
+                // 结果是「不把鼠标挨个划一遍就不知道每项是干什么的」。
+                True(ui.Contains("\"RowDesc\""), "说明必须常驻在行内，不能只靠悬停");
+                True(ui.Contains("hasHint ? 62f : 46f") || ui.Contains("RowHeight(hasHint)"),
+                    "带说明的行必须留出第二行高度");
                 True(ui.Contains("UpdateHoverHint") && ui.Contains("_hintText"),
                     "必须把说明搬到悬停描述栏");
             });
@@ -122,7 +626,8 @@ namespace ApexCheatEnder.Tests
                     "两个配置项都要有");
 
                 var tags = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Core/PresenceTags.cs"));
-                True(tags.Contains("原本玩家"), "默认文案应为「原本玩家」");
+                True(tags.Contains("原版玩家"), "默认文案应为「原版玩家」");
+                True(tags.Contains("LegacyVanillaTag"), "必须记录旧文案以便迁移");
             });
 
             Run("瞬移阈值：必须高于网络延迟校正的幅度", () =>
@@ -130,7 +635,7 @@ namespace ApexCheatEnder.Tests
                 var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
                 var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Config/AntiCheatConfig.cs"));
                 // 实测 4.79 单位的位移是延迟校正，不是作弊
-                True(cfg.Contains("\"一下挪多远算瞬移\", 8.0f"), "瞬移阈值默认必须抬到 8.0");
+                True(cfg.Contains("\"瞬移判定距离\", 8.0f"), "瞬移阈值默认必须抬到 8.0");
                 True(cfg.Contains("AcceptableValueRange<float>(1f, 60f)"), "上限要够容纳真实瞬移");
                 True(cfg.Contains("Math.Abs(TeleportMinDistance.Value - 4.5f)"), "必须有旧值迁移");
             });
@@ -146,6 +651,50 @@ namespace ApexCheatEnder.Tests
                 True(notice.Contains("fromSelf"), "自己发的消息不得提示");
             });
 
+            Run("瞬移：落点不稳（网络抖动）不得判为瞬移", TestTeleportNeedsStableLanding);
+            Run("击杀：采样窗口内存在合法距离时不得判超距", TestKillDistanceUsesWindowMinimum);
+            Run("击杀：同一次击杀被上报两次不得判为冷却绕过", () =>
+            {
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                    "ace-kcd-" + Guid.NewGuid().ToString("N") + ".cfg");
+                var cfg = new ApexCheatEnder.Config.AntiCheatConfig(new BepInEx.Configuration.ConfigFile(path, false));
+                var analyzer = new BehaviorAnalyzer(cfg, null);
+
+                PlayerTrack MakeKiller(int id)
+                {
+                    var t = new PlayerTrack(id, "凶手", 0f);
+                    t.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), IsImpostor = true, RoleKnown = true });
+                    t.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(0f, 0f), IsImpostor = true, RoleKnown = true });
+                    return t;
+                }
+                PlayerTrack MakeVictim(int id)
+                {
+                    var t = new PlayerTrack(id, "目标", 0f);
+                    t.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0.5f, 0f) });
+                    t.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(0.5f, 0f) });
+                    return t;
+                }
+
+                // 第一次击杀：正常，不该报
+                var k = MakeKiller(1);
+                var v = MakeVictim(2);
+                analyzer.AnalyzeKill(k, v, 1f, 5f, 30f, new List<Violation>());
+
+                // 0.2 秒后「同凶手 + 同目标」再次出现 —— 同一次击杀被处理了两次。
+                // 游戏里不可能杀同一个人两次（第二次时对方已经是尸体）。
+                var dup = new List<Violation>();
+                analyzer.AnalyzeKill(k, v, 1.2f, 5f, 30f, dup);
+                True(!dup.Exists(x => x.Kind == ViolationKind.KillCooldownBypass),
+                    "同凶手同目标极短间隔 = 同一次击杀，不得判冷却绕过");
+
+                // 真作弊杀的是**不同**的人 —— 必须照样抓住
+                var k2 = MakeKiller(3);
+                analyzer.AnalyzeKill(k2, MakeVictim(4), 1f, 5f, 30f, new List<Violation>());
+                var cheat = new List<Violation>();
+                analyzer.AnalyzeKill(k2, MakeVictim(5), 1.2f, 5f, 30f, cheat);
+                True(cheat.Exists(x => x.Kind == ViolationKind.KillCooldownBypass),
+                    "不同目标在冷却内连杀必须判为绕过 —— 排重不能把真作弊一起漏掉");
+            });
             Run("瞬移：必须豁免梯子与移动平台，不能只判管道", () =>
             {
                 var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
@@ -205,7 +754,7 @@ namespace ApexCheatEnder.Tests
                 var root = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../.."));
                 var cfg = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/Config/AntiCheatConfig.cs"));
                 // 原来 5 秒，现场反馈"还没读完就没了"
-                True(cfg.Contains("\"提醒停留几秒\", 12f"), "通知默认停留时长必须放宽到 12 秒");
+                True(cfg.Contains("\"通知停留时长（秒）\", 12f"), "通知默认停留时长必须放宽到 12 秒");
                 True(cfg.Contains("AcceptableValueRange<float>(2f, 60f)"), "上限必须提到 60 秒");
 
                 var panel = System.IO.File.ReadAllText(System.IO.Path.Combine(root, "src/UI/NotificationPanel.cs"));
@@ -249,7 +798,7 @@ namespace ApexCheatEnder.Tests
             Run("工具：有界历史独立快照", ToolsPageTests.History);
             Run("工具：脱敏导出", ToolsPageTests.Export);
             Run("工具：二次确认边界与取消", ToolsPageTests.Confirmation);
-            Run("工具：六组编辑和历史映射", ToolsPageTests.Mapping);
+            Run("工具：分组编辑和历史映射", ToolsPageTests.Mapping);
             Run("工具：预设安全与映射持久化", ToolsPageTests.ConfigSafety);
             Run("聊天：真实运行时集成约束", ToolsPageTests.RuntimeIntegration);
 
@@ -319,7 +868,10 @@ namespace ApexCheatEnder.Tests
             for (var page = 0; page < pageCounts.Length; page++)
                 for (var row = 0; row < pageCounts[page]; row++)
                     True(SettingsLayout.Group(page, row) < SettingsLayout.GroupNames[page].Length, "分组标题存在");
-            Eq(2, SettingsLayout.Group(2, 100), "动态处置玩家属于命中卡片");
+            // 按组名断言，不写死组号 —— 重新划分子标签时不该再挂
+            True(SettingsLayout.GroupNames[2][SettingsLayout.Group(2, 100)] == "当前命中玩家",
+                "动态处置玩家应归入「当前命中玩家」分组，实际 "
+                + SettingsLayout.GroupNames[2][SettingsLayout.Group(2, 100)]);
         }
 
         /// <summary>随机池里的全部下标。张数变了不用改测试，跟着 BackgroundCount 走。</summary>
@@ -328,6 +880,43 @@ namespace ApexCheatEnder.Tests
             var all = new int[MenuArtSource.BackgroundCount];
             for (var i = 0; i < all.Length; i++) all[i] = i;
             return all;
+        }
+
+        /// <summary>
+        /// 子标签表必须自洽。
+        ///
+        /// 最要命的一条是「每个分组都得被某个子标签覆盖」——
+        /// 漏掉一个分组，那部分设置就**永远看不到**（切遍所有子标签都找不到），
+        /// 而且不会报任何错。这类「东西还在但摸不到」的问题只能靠全表校验兜住。
+        /// </summary>
+        private static void TestSubTabCoverage()
+        {
+            for (var page = 0; page < SettingsLayout.GroupNames.Length; page++)
+            {
+                var defs = SettingsLayout.SubTabsFor(page);
+                True(defs.Length >= 1, "第 " + page + " 页必须有子标签定义");
+
+                var groupCount = SettingsLayout.GroupNames[page].Length;
+
+                foreach (var d in defs)
+                {
+                    True(d.Groups != null && d.Groups.Length >= 1, d.Name + " 必须至少覆盖一个分组");
+                    foreach (var g in d.Groups)
+                        True(g >= 0 && g < groupCount,
+                            "子标签「" + d.Name + "」引用了不存在的分组 " + g + "（本页只有 " + groupCount + " 个）");
+                }
+
+                // 覆盖性：每个分组都必须出现在至少一个子标签里
+                for (var g = 0; g < groupCount; g++)
+                {
+                    var covered = false;
+                    foreach (var d in defs)
+                        if (System.Array.IndexOf(d.Groups, g) >= 0) { covered = true; break; }
+
+                    True(covered, "第 " + page + " 页分组「" + SettingsLayout.GroupNames[page][g]
+                        + "」没有被任何子标签覆盖 —— 这部分设置将无法看到");
+                }
+            }
         }
 
         private static void TestMenuArtInitialSelection()
@@ -525,6 +1114,90 @@ namespace ApexCheatEnder.Tests
         /// 相对位移判定（任务速度）比较同一玩家前后两次任务点，固定偏移相减时抵消，
         /// 因此必须保留 —— 这条测试同时守住「别一刀切把任务检测全删了」。
         /// </summary>
+        /// <summary>
+        /// 瞬移必须先确认落点稳定。
+        ///
+        /// 网络抖动会让位置跳过去、下一帧又跳回来（客户端拿到权威位置后自我纠正）；
+        /// 真实瞬移的落点不会回去。现场出现过单帧 11.77 单位的跳变，就是一次重同步。
+        /// </summary>
+        private static void TestTeleportNeedsStableLanding()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                "ace-tp-" + Guid.NewGuid().ToString("N") + ".cfg");
+            var cfg = new ApexCheatEnder.Config.AntiCheatConfig(new BepInEx.Configuration.ConfigFile(path, false));
+            var analyzer = new BehaviorAnalyzer(cfg, null);
+
+            // --- 抖动：跳过去又跳回来 → 不得上报 ---
+            var jitter = new PlayerTrack(1, "抖动", 0f);
+            jitter.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f) });
+            jitter.Push(new PlayerSnapshot { Time = 5f, Position = new GameVec2(0f, 0f) });     // 过开局宽限期
+            jitter.Push(new PlayerSnapshot { Time = 5.1f, Position = new GameVec2(20f, 0f) });  // 单帧跳 20 单位
+
+            var first = new List<Violation>();
+            analyzer.AnalyzeMovement(jitter, 5.1f, 4f, 0f, first);
+            True(!first.Exists(v => v.Kind == ViolationKind.Teleport),
+                "检测到不可能位移的当帧不得立即上报，必须先确认落点");
+
+            jitter.Push(new PlayerSnapshot { Time = 5.2f, Position = new GameVec2(0.05f, 0f) }); // 跳回原处
+            var back = new List<Violation>();
+            analyzer.AnalyzeMovement(jitter, 5.2f, 4f, 0f, back);
+            True(!back.Exists(v => v.Kind == ViolationKind.Teleport),
+                "位置跳回原处说明是网络抖动，不得判为瞬移");
+
+            // --- 真瞬移：落点稳定 → 必须上报 ---
+            var real = new PlayerTrack(2, "瞬移", 0f);
+            real.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f) });
+            real.Push(new PlayerSnapshot { Time = 5f, Position = new GameVec2(0f, 0f) });
+            real.Push(new PlayerSnapshot { Time = 5.1f, Position = new GameVec2(20f, 0f) });
+            analyzer.AnalyzeMovement(real, 5.1f, 4f, 0f, new List<Violation>());
+
+            real.Push(new PlayerSnapshot { Time = 5.2f, Position = new GameVec2(20.1f, 0f) }); // 落点稳定
+            var confirmed = new List<Violation>();
+            analyzer.AnalyzeMovement(real, 5.2f, 4f, 0f, confirmed);
+            True(confirmed.Exists(v => v.Kind == ViolationKind.Teleport),
+                "落点稳定时必须判为瞬移，否则真作弊会漏掉");
+        }
+
+        /// <summary>
+        /// 击杀距离必须取采样窗口内的最小值。
+        ///
+        /// killer 与 victim 的位置各来自最近一次采样，击杀 RPC 还带网络延迟；
+        /// 只比「当前点对当前点」会把正常击杀算成超限。现场出现过 2.10 / 上限 1.75。
+        /// </summary>
+        private static void TestKillDistanceUsesWindowMinimum()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                "ace-kill-" + Guid.NewGuid().ToString("N") + ".cfg");
+            var cfg = new ApexCheatEnder.Config.AntiCheatConfig(new BepInEx.Configuration.ConfigFile(path, false));
+            var analyzer = new BehaviorAnalyzer(cfg, null);
+
+            // 双方都在移动：当前点相距 2.10（超限），但上一帧组合只有 1.50（限内）
+            var killer = new PlayerTrack(1, "杀手", 0f);
+            var victim = new PlayerTrack(2, "目标", 0f);
+            killer.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), IsImpostor = true, RoleKnown = true });
+            killer.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(2.1f, 0f), IsImpostor = true, RoleKnown = true });
+            victim.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(1.5f, 0f) });
+            victim.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(0f, 0f) });
+
+            var near = new List<Violation>();
+            analyzer.AnalyzeKill(killer, victim, 0.1f, 1.0f, 20f, near);
+            True(!near.Exists(v => v.Kind == ViolationKind.KillTooFar),
+                "采样窗口内存在合法距离时不得判超距击杀");
+
+            // 真远距离击杀：所有时刻组合都超限 → 必须报
+            var far = new PlayerTrack(3, "远杀", 0f);
+            var farVictim = new PlayerTrack(4, "目标二", 0f);
+            far.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(0f, 0f), IsImpostor = true, RoleKnown = true });
+            far.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(0.1f, 0f), IsImpostor = true, RoleKnown = true });
+            farVictim.Push(new PlayerSnapshot { Time = 0f, Position = new GameVec2(6f, 0f) });
+            farVictim.Push(new PlayerSnapshot { Time = 0.1f, Position = new GameVec2(6.1f, 0f) });
+
+            var farHits = new List<Violation>();
+            analyzer.AnalyzeKill(far, farVictim, 0.1f, 1.0f, 20f, farHits);
+            True(farHits.Exists(v => v.Kind == ViolationKind.KillTooFar),
+                "真远距离击杀必须抓住，否则误报修好了却漏报");
+        }
+
         private static void TestTaskPositionTrust()
         {
             var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
@@ -601,7 +1274,9 @@ namespace ApexCheatEnder.Tests
 
             // 2. 永不丢包
             var prefixStart = patch.IndexOf("private static bool Prefix", StringComparison.Ordinal);
-            var prefixEnd = patch.IndexOf("private static byte ExtractCallId", StringComparison.Ordinal);
+            // Prefix 现在是类里的最后一个方法，用文件末尾定位。
+            // （原来锚在 ExtractCallId 上，那个方法已随强类型参数改造一起删掉。）
+            var prefixEnd = patch.LastIndexOf("}", StringComparison.Ordinal);
             True(prefixStart >= 0 && prefixEnd > prefixStart, "应能定位 Prefix 方法体");
             var prefix = patch.Substring(prefixStart, prefixEnd - prefixStart);
             True(prefix.Contains("return true;"), "Prefix 必须放行");
@@ -899,15 +1574,41 @@ namespace ApexCheatEnder.Tests
             // 关掉 LeftPanel / RightPanel 底板 —— 那是配合它自己重绘的界面。
             // 实测隐藏这些会导致主菜单「开始」按钮点不动（和菜单交互流程绑在一起）。
             // 用 artCode（已去注释）判断，否则注释里举的例子会被当成代码
-            True(!artCode.Contains("\"MaskedBlackScreen\""), "不得隐藏 MaskedBlackScreen —— 会让开始按钮点不动");
-            True(artCode.Contains("\"RightPanel\""), "必须关闭 RightPanel 底板 —— 它的外框会盖在背景上");
-            True(!artCode.Contains("\"LeftPanel\""),
-                "不得关闭 LeftPanel 底板 —— 左侧按钮区，和菜单交互关联更可疑");
+            // 它现在出现在 NeverDisable 里（正确用法），关键是不能出现在隐藏名单里
+            // 它就是现场那个黑框（7.7x4.9 的带窗口黑幕），必须关掉；
+            // 之前误判成切换黑幕放进禁改名单，框才一直没去掉
+            True(artCode.Contains("RightPanel/MaskedBlackScreen"), "MaskedBlackScreen 必须关掉（它就是那个黑框）");
+            {
+                // 它必须只出现在「要关」名单里，绝不能出现在禁改名单里
+                var block = artCode.Substring(artCode.IndexOf("NeverDisable"));
+                block = block.Substring(0, block.IndexOf("};"));
+                True(!block.Contains("MaskedBlackScreen"),
+                    "MaskedBlackScreen 不得留在禁改名单 —— 它就是那个黑框");
+            }
+            // GameObject.Find 传部分路径会返回 null —— 现场就是它导致黑框没关掉
+            True(artCode.Contains("ResolveUnderMenu"), "必须逐级解析路径，不能用 GameObject.Find 传部分路径");
+            // 游戏会重新启用这些渲染器，必须每帧重申
+            True(artCode.Contains("ReassertHidden"), "必须每帧重申隐藏，否则抢不过游戏的重新启用");
+            // 顶栏在 AccountManager 下，不在 MainMenuManager 树里 —— 扫菜单树永远找不到
+            True(artCode.Contains("AccountTab/GameHeader/BarSprite"), "必须处理顶栏底板");
+            True(artCode.Contains("FindObjectOfType<AccountManager>"), "顶栏要从 AccountManager 找");
+            True(artCode.Contains("ClearedRenderers"), "透明色也要每帧重申");
+            True(artCode.Contains("AspectScaler/RightPanel"), "必须关闭 RightPanel 底板 —— 它的外框会盖在背景上");
+            // 递归关闭闯过大祸：一次关掉 132 个渲染器，把菜单切换黑幕也关了，
+            // 导致主菜单与子菜单同时显示。必须精确点名，绝不递归。
+            True(!art.Contains("DisableRenderersRecursive"), "不得递归关闭子树（会误伤菜单切换黑幕）");
+            True(art.Contains("NeverDisable"), "必须有禁改名单，挡住 MaskedBlackScreen 等流程必需对象");
+            True(art.Contains("LogLargeRenderers"), "必须有诊断：列不出对象时能直接定位是谁在画");
+            // LeftPanel 现在**故意**隐藏（用户要求左侧面板底透明）。
+            // 它是单一渲染器，安全；出问题的是「递归关整个子树」，见下面的禁改名单。
+            True(artCode.Contains("AspectScaler/LeftPanel"), "LeftPanel 应在透明名单里");
             True(!artCode.Contains("\"WindowShine\""), "不得隐藏 WindowShine —— 非必需，少动少错");
             True(artCode.Contains("\"BackgroundTexture\""), "但必须隐藏 BackgroundTexture —— 否则背景永远露不出来");
 
             // 三条「自作聪明」的弯路，永久禁止
-            True(!artCode.Contains("sortingOrder"), "不得设 sortingOrder —— 抬高会盖住游戏 UI（实测）");
+            // 只禁止「设置」自己的排序值；诊断里读取 sr.sortingOrder 是允许的
+            True(!artCode.Contains("sortingOrder =") && !artCode.Contains("sortingOrder="),
+                "不得设 sortingOrder —— 抬高会盖住游戏 UI（实测）");
             True(!artCode.Contains("TryComputeCoverSize") && !artCode.Contains("CoverSafetyFactor"),
                 "不得自创「取所有相机最大值 × 安全系数」的尺寸算法，Amethyst 只用 Camera.main");
             True(!artCode.Contains("ScreenSpaceOverlay"), "不得用 Overlay 画布 —— 它会盖住游戏 UI");

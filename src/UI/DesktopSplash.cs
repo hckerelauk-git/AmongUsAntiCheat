@@ -74,7 +74,7 @@ namespace ApexCheatEnder.UI
 
         // ================= 配色 =================
         // 说明：GDI 的 COLORREF 是 0x00BBGGRR（注意是 BGR，不是 RGB），
-        // 注释里标注的是人看的 RGB 值，别照着 RGB 直接抄。
+        // 注释中标注的是供人阅读的 RGB 值，不可直接照抄。
 
         /// <summary>卡片底色渐变：上 #0A1018 → 下 #141F33（深空蓝黑）。</summary>
         private const int ColorBgTop = 0x0018100A;
@@ -115,6 +115,10 @@ namespace ApexCheatEnder.UI
         private static int _lastAlphaByte = -1;
 
         // ================= GDI 资源（全局复用） =================
+        /// <summary>GDI+ 令牌与图标位图。为 0 表示不可用，此时回退到手绘徽标。</summary>
+        private static IntPtr _gdiplusToken = IntPtr.Zero;
+        private static IntPtr _iconBitmap = IntPtr.Zero;
+
         private static IntPtr _brushBadgeBg;   // 徽标底衬
         private static IntPtr _brushAccent;    // 青色强调（盾牌 / 进度填充）
         private static IntPtr _brushTrack;     // 进度条轨道
@@ -298,6 +302,46 @@ namespace ApexCheatEnder.UI
         [DllImport("gdi32.dll")]
         private static extern bool Ellipse(IntPtr hdc, int left, int top, int right, int bottom);
 
+        // ================= GDI+（只用来显示图标） =================
+        //
+        // 启动动画窗口是纯 GDI 的（不依赖 WinForms/WPF —— 游戏进程跑在 CoreCLR 上，
+        // 机器上通常没装 .NET Desktop Runtime）。但 GDI 本身画不了 PNG，
+        // 要显示真实的插件图标只能借 GDI+ 解一次 PNG，再画到同一个 HDC 上。
+        // 任何一步失败都回退到手绘盾牌，不影响动画本身。
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct GdiplusStartupInput
+        {
+            public uint GdiplusVersion;
+            public IntPtr DebugEventCallback;
+            public int SuppressBackgroundThread;
+            public int SuppressExternalCodecs;
+        }
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdiplusStartup(out IntPtr token, ref GdiplusStartupInput input, IntPtr output);
+
+        [DllImport("gdiplus.dll")]
+        private static extern void GdiplusShutdown(IntPtr token);
+
+        [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)]
+        private static extern int GdipCreateBitmapFromFile(string filename, out IntPtr bitmap);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipCreateFromHDC(IntPtr hdc, out IntPtr graphics);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipDeleteGraphics(IntPtr graphics);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipDisposeImage(IntPtr image);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipSetInterpolationMode(IntPtr graphics, int mode);
+
+        [DllImport("gdiplus.dll")]
+        private static extern int GdipDrawImageRectI(IntPtr graphics, IntPtr image, int x, int y, int width, int height);
+
         /// <summary>填充多边形（用于盾牌徽标）。</summary>
         [DllImport("gdi32.dll")]
         private static extern bool Polygon(IntPtr hdc, POINT[] lpPoints, int nCount);
@@ -375,7 +419,7 @@ namespace ApexCheatEnder.UI
                 }
 
                 // 把窗口裁成圆角卡片。
-                // 直角矩形贴在桌面上非常廉价（像便利贴），圆角是「这是个成品 UI」
+                // 直角矩形贴在桌面上观感廉价（类似便签），圆角用于表达成品 UI 质感
                 // 与「这是个测试窗口」最直观的分界线。
                 // 注意：SetWindowRgn 成功后由系统接管该 HRGN，不要再 DeleteObject。
                 try
@@ -553,7 +597,7 @@ namespace ApexCheatEnder.UI
         /// <summary>
         /// 左侧盾牌徽标。
         /// 用「圆角方块底衬 + 青色盾牌多边形」而不是纯文字，是因为纯文字标志
-        /// 在缩略尺寸下完全没有识别度，看上去就像个报错弹窗。
+        /// 缩略尺寸下缺乏辨识度，观感类似错误弹窗。
         /// </summary>
         private static void DrawBadge(IntPtr hdc)
         {
@@ -568,6 +612,9 @@ namespace ApexCheatEnder.UI
             RoundRect(hdc, bx, by, b2, b3, 10, 10);
             SelectObject(hdc, oldPen);
             SelectObject(hdc, oldBrush);
+
+            // 优先显示插件真实图标；取不到再回退到手绘盾牌。
+            if (DrawIconInto(hdc, bx + 3, by + 3, BadgeSize - 6)) return;
 
             // 盾牌多边形：平顶 + 两侧下收 + 底部尖角。
             // 注意别把顶部也做成尖的 —— 那样画出来是颗宝石，不是盾牌。
@@ -590,6 +637,69 @@ namespace ApexCheatEnder.UI
             Polygon(hdc, pts, pts.Length);
             SelectObject(hdc, op);
             SelectObject(hdc, ob);
+        }
+
+        /// <summary>把已加载的图标缩放绘制到指定矩形。成功返回 true。</summary>
+        private static bool DrawIconInto(IntPtr hdc, int x, int y, int size)
+        {
+            if (_iconBitmap == IntPtr.Zero || _gdiplusToken == IntPtr.Zero) return false;
+
+            var g = IntPtr.Zero;
+            try
+            {
+                if (GdipCreateFromHDC(hdc, out g) != 0 || g == IntPtr.Zero) return false;
+                GdipSetInterpolationMode(g, 7);   // HighQualityBicubic
+                return GdipDrawImageRectI(g, _iconBitmap, x, y, size, size) == 0;
+            }
+            catch { return false; }
+            finally { if (g != IntPtr.Zero) GdipDeleteGraphics(g); }
+        }
+
+        /// <summary>
+        /// 初始化 GDI+ 并加载内嵌的 Icon.png。
+        /// 任何一步失败都静默降级（图标为 0 时 DrawBadge 会走手绘分支）。
+        /// </summary>
+        private static void LoadIcon()
+        {
+            try
+            {
+                var input = new GdiplusStartupInput { GdiplusVersion = 1 };
+                if (GdiplusStartup(out _gdiplusToken, ref input, IntPtr.Zero) != 0)
+                {
+                    _gdiplusToken = IntPtr.Zero;
+                    return;
+                }
+
+                var path = ExtractIconToTemp();
+                if (path == null) return;
+
+                if (GdipCreateBitmapFromFile(path, out var bmp) == 0 && bmp != IntPtr.Zero)
+                    _iconBitmap = bmp;
+            }
+            catch (Exception ex)
+            {
+                AntiCheatRuntime.Log?.LogWarning("[桌面动画] 图标加载失败，回退到手绘徽标：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 把内嵌的 Icon.png 落到临时文件。
+        /// GDI+ 有从流加载的接口，但那需要自己封 IStream，出错面比「先落盘再读文件」大得多。
+        /// </summary>
+        private static string ExtractIconToTemp()
+        {
+            try
+            {
+                using var stream = System.Reflection.Assembly.GetExecutingAssembly()
+                    .GetManifestResourceStream("ApexCheatEnder.Icon.png");
+                if (stream == null) return null;
+
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ace-splash-icon.png");
+                using var file = System.IO.File.Create(path);
+                stream.CopyTo(file);
+                return path;
+            }
+            catch { return null; }
         }
 
         /// <summary>标题与副标题。用字号与颜色拉出层级，不再靠假投影。</summary>
@@ -695,8 +805,10 @@ namespace ApexCheatEnder.UI
             _fontSub = CreateFont(12, 0, 0, 0, 400, 0, 0, 0, DEFAULT_CHARSET,
                 OUT_TT_PRECIS, 0, CLEARTYPE_QUALITY, 0, "Microsoft YaHei");
 
+            LoadIcon();
+
             AntiCheatRuntime.Log?.LogInfo(
-                $"[桌面动画] 字体句柄 title={_fontTitle} sub={_fontSub}");
+                $"[桌面动画] 字体句柄 title={_fontTitle} sub={_fontSub}，图标={(_iconBitmap != IntPtr.Zero ? "已加载" : "未加载")}");
         }
 
         private static void CleanupResources()
@@ -712,6 +824,9 @@ namespace ApexCheatEnder.UI
             _brushBadgeBg = _brushAccent = _brushTrack = IntPtr.Zero;
             _penBorder = _penAccentDim = IntPtr.Zero;
             _fontTitle = _fontSub = IntPtr.Zero;
+
+            if (_iconBitmap != IntPtr.Zero) { GdipDisposeImage(_iconBitmap); _iconBitmap = IntPtr.Zero; }
+            if (_gdiplusToken != IntPtr.Zero) { GdiplusShutdown(_gdiplusToken); _gdiplusToken = IntPtr.Zero; }
 
             // 渐变画刷是按需创建的，必须回收 —— GDI 句柄是进程级限额。
             foreach (var brush in GradientBrushes.Values) DeleteObject(brush);

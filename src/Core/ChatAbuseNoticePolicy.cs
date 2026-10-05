@@ -12,7 +12,7 @@ namespace ApexCheatEnder.Core
         /// 收录原则：**针对人的辱骂**。
         /// 纯感叹词（卧槽、我操、他妈、妈的）刻意不收 —— 那是口头禅，
         /// 不是骂人，收进来只会天天误报。
-        /// 想加词直接编辑 apex.cheat.ender.cfg 里的「疑似骂人关键词」。
+        /// 如需增加词条，编辑 apex.cheat.ender.cfg 中的「触发关键词」。
         /// </summary>
         internal const string DefaultKeywords =
             "你妈死了,你妈死,死妈,你全家,死全家,全家死光,断子绝孙,不得好死," +
@@ -29,7 +29,7 @@ namespace ApexCheatEnder.Core
         /// 关键词前面紧邻这些字样时，视为「引用 / 否定 / 劝阻」，不提示。
         ///
         /// 中文没有词边界，纯子串匹配必然把「别说傻逼」「他骂我傻逼」「举报这个傻逼」
-        /// 这类也算上 —— 现场误报就是这么来的。
+        /// 这类输入同样计入 —— 是误报的主要来源。
         /// 只在这些字样**紧贴**关键词时才豁免，不扩大范围，避免漏掉真的辱骂。
         /// </summary>
         private static readonly string[] BenignPrefixes =

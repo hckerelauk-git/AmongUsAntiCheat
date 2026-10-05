@@ -34,10 +34,10 @@ namespace ApexCheatEnder.Core
         /// 入会后的豁免时长（秒）。
         ///
         /// 会议一开始，游戏会把**所有人**瞬间传送到会议桌 —— 这是一次巨大的位移。
-        /// 好友现场日志里，会议开始那一瞬 10 个玩家全部命中 MoveDuringMeeting
+        /// 实测日志显示，会议开始瞬间全部 10 名玩家同时命中 MoveDuringMeeting
         /// （位移 3.15 ~ 21.43 单位），显然是传送而不是「会议期间走动」。
         ///
-        /// 1 秒足够覆盖传送落位与随后的位置同步抖动；再往后还有位移就是真的在动了。
+        /// 1 秒足以覆盖传送落位与随后的位置同步抖动；此后仍有位移即为真实移动。
         /// </summary>
         private const float MeetingEnterGrace = 3.0f;
 
@@ -92,6 +92,7 @@ namespace ApexCheatEnder.Core
             if (cur.IsDead)
             {
                 track.ConsecutiveSpeedStrikes = 0;
+                track.HasPendingTeleport = false;
                 return;
             }
 
@@ -101,6 +102,8 @@ namespace ApexCheatEnder.Core
             {
                 track.ConsecutiveSpeedStrikes = 0;
                 track.LastLegalTeleportTime = now;
+                // 进管道 / 上梯子本身就是合法大位移，刚才那次「疑似瞬移」据此撤销
+                track.HasPendingTeleport = false;
                 return;
             }
 
@@ -108,6 +111,7 @@ namespace ApexCheatEnder.Core
             if (cur.InMeeting)
             {
                 track.ConsecutiveSpeedStrikes = 0;
+                track.HasPendingTeleport = false;
                 return;
             }
 
@@ -117,10 +121,28 @@ namespace ApexCheatEnder.Core
             // 处于合法传送豁免窗口内（刚收到 SnapTo 同步）
             if (track.IsInLegalTeleportWindow(now)) return;
 
+            var jitter = _cfg.PositionJitterTolerance.Value;
+
+            // 本帧位移正常 → 确认上一帧那次「疑似瞬移」：
+            //   还在新落点附近 → 是真的跳过去了，上报
+            //   已经回到原处     → 是抖动，丢弃
+            //
+            // **必须放在抖动早退之前。**
+            // 落点稳定时本帧位移本来就很小（趋近 0），先撞上 `distance < jitter`
+            // 就 return 了，确认逻辑永远跑不到 —— 真瞬移会被漏掉。
+            // 这个顺序问题是测试抓出来的，不是推理出来的。
+            if (track.HasPendingTeleport)
+            {
+                var backToOrigin = GameVec2.Distance(cur.Position, track.PendingFrom) <= jitter * 2f;
+                if (!backToOrigin)
+                    ReportTeleport(track, now, track.PendingDistance, track.PendingDeltaTime, output);
+
+                track.HasPendingTeleport = false;
+            }
+
             var distance = cur.DeltaDistance;
 
             // 抖动容差：小于该位移视为网络同步噪声
-            var jitter = _cfg.PositionJitterTolerance.Value;
             if (distance < jitter)
             {
                 DecaySpeedStrikes(track);
@@ -139,10 +161,36 @@ namespace ApexCheatEnder.Core
             var impossibleSpeed = maxAllowedSpeed * TeleportSpeedFactor;
             if (distance >= _cfg.TeleportMinDistance.Value && impliedSpeed > impossibleSpeed)
             {
-                ReportTeleport(track, now, distance, dt, output);
+                // **不当场判定，先记下等下一帧看落点稳不稳。**
+                //
+                // 网络抖动会让位置跳过去、下一帧又跳回来（客户端拿到权威位置后自我纠正）；
+                // 真实瞬移的落点不会回去。当场上报会把抖动全判成作弊 ——
+                // 实测出现过单帧 11.77 单位的跳变，那就是一次重同步。
+                // 诊断：把当时的完整运动状态打出来。
+                // 位置类误报的根因几乎都是「某个合法状态没被识别」，
+                // 只写「位移 19.18 单位」是查不出来的。
+                if (DescribeState != null && now - _lastMotionDiagTime >= 1f)
+                {
+                    _lastMotionDiagTime = now;
+                    try
+                    {
+                        _log?.LogWarning(
+                            $"[位移诊断] {track.Name}({track.PlayerId}) 位移 {distance:F2} 单位 / {dt:F3} 秒"
+                            + $"（隐含速度 {impliedSpeed:F1}，上限 {impossibleSpeed:F1}）"
+                            + $"\n  从 {track.Previous.Position} 到 {cur.Position}"
+                            + $"\n  " + DescribeState(track.PlayerId));
+                    }
+                    catch { }
+                }
+
+                track.HasPendingTeleport = true;
+                track.PendingFrom = track.Previous.Position;
+                track.PendingDistance = distance;
+                track.PendingDeltaTime = dt;
                 track.ConsecutiveSpeedStrikes = 0;
                 return;
             }
+
 
             // ---------- 判定二：持续超速 ----------
             var speed = distance / dt;
@@ -219,6 +267,13 @@ namespace ApexCheatEnder.Core
             }
         }
 
+        /// <summary>
+        /// 运动状态摘要钩子。核心层不引用 GameBridge，由运行时注入。
+        /// </summary>
+        public static Func<int, string> DescribeState;
+
+        private float _lastMotionDiagTime = float.NegativeInfinity;
+
         private void ReportTeleport(PlayerTrack track, float now, float distance, float dt, List<Violation> output)
         {
             if (now - track.LastTeleportReportTime < TeleportReportCooldown) return;
@@ -226,7 +281,7 @@ namespace ApexCheatEnder.Core
             track.TeleportStrikeCount++;
             track.FlaggedThisRound = true;
 
-            // 首次瞬移留有余地（可能是极端网络抖动），重复出现直接定为确定性证据
+            // 首次瞬移保留余地（可能为极端网络抖动），重复出现则判为确定性证据
             var severity = track.TeleportStrikeCount >= 2 ? Severity.Critical : Severity.High;
 
             output.Add(new Violation(
@@ -267,6 +322,26 @@ namespace ApexCheatEnder.Core
         /// <param name="allowedKillDistance">当前设置允许的最大击杀距离。</param>
         /// <param name="killCooldown">当前角色的击杀冷却（秒）。</param>
         /// <param name="output">证据收集器。</param>
+        /// <summary>
+        /// 采样窗口内 killer 与 victim 的最小距离。
+        /// 两个玩家的上一帧/当前帧两两组合取最小 —— 用来抵消采样错位与 RPC 延迟。
+        /// </summary>
+        private static float MinDistanceOverWindow(PlayerTrack killer, PlayerTrack victim)
+        {
+            var best = GameVec2.Distance(killer.Current.Position, victim.Current.Position);
+
+            if (killer.HasPrevious)
+                best = Math.Min(best, GameVec2.Distance(killer.Previous.Position, victim.Current.Position));
+
+            if (victim.HasPrevious)
+                best = Math.Min(best, GameVec2.Distance(killer.Current.Position, victim.Previous.Position));
+
+            if (killer.HasPrevious && victim.HasPrevious)
+                best = Math.Min(best, GameVec2.Distance(killer.Previous.Position, victim.Previous.Position));
+
+            return best;
+        }
+
         public void AnalyzeKill(
             PlayerTrack killer,
             PlayerTrack victim,
@@ -282,7 +357,7 @@ namespace ApexCheatEnder.Core
             // ---------- 角色校验：非内鬼执行击杀 ----------
             //
             // 必须等角色信息同步到位才能判。
-            // 角色未知时 IsImpostor 恒为 false，直接判会把开局阶段正常玩家的击杀
+            // 角色未知时 IsImpostor 恒为 false，直接判定会将开局阶段正常玩家的击杀
             // 误报成「非内鬼击杀」—— 破坏判定那边早就加了 RoleKnown 守卫，这里漏了。
             if (killer.Current.RoleKnown && !killer.Current.IsImpostor && !killer.Current.IsDead)
             {
@@ -300,7 +375,15 @@ namespace ApexCheatEnder.Core
             // ---------- 距离校验 ----------
             if (victim != null)
             {
-                var distance = GameVec2.Distance(killer.Current.Position, victim.Current.Position);
+                // **取采样窗口内的最小距离，而不是只比「当前点对当前点」。**
+                //
+                // killer 与 victim 的位置各自来自最近一次采样（最长 0.1 秒前），
+                // 击杀 RPC 本身还带着网络延迟 —— 三者叠加，一个正常击杀完全可能
+                // 被算成「超出 0.3 单位」。实测出现过 2.10 / 上限 1.75 的误报。
+                //
+                // 只要「任一合理时刻组合」落在允许范围内，就不能断定是超距击杀。
+                // 真正的远距离击杀（比如 5 单位）在所有组合下都超限，照样抓得住。
+                var distance = MinDistanceOverWindow(killer, victim);
                 var limit = allowedKillDistance + tolerance;
 
                 if (distance > limit)
@@ -323,7 +406,21 @@ namespace ApexCheatEnder.Core
             }
 
             // ---------- 冷却校验 ----------
-            if (!float.IsNegativeInfinity(killer.LastKillTime))
+            //
+            // **先排重「同一次击杀被上报两次」。**
+            //
+            // 现场：报出「两次击杀间隔仅 0.20 秒，冷却 30 秒」，看着像铁证，
+            // 但 0.20 秒这个量级正是同一个事件被处理两次的样子。
+            //
+            // 判据：同一凶手 + 同一目标 + 极短间隔 = 同一次击杀。
+            // 因为**游戏里不可能杀同一个人两次** —— 第二次时对方已经是尸体。
+            // 这个判据不会漏掉真作弊：真绕过冷却必然杀的是**不同**的人。
+            var duplicateKill = victim != null
+                                && killer.LastKillVictimId == victim.PlayerId
+                                && !float.IsNegativeInfinity(killer.LastKillTime)
+                                && now - killer.LastKillTime < 1f;
+
+            if (!duplicateKill && !float.IsNegativeInfinity(killer.LastKillTime))
             {
                 var interval = now - killer.LastKillTime;
                 var minInterval = killCooldown - _cfg.KillCooldownTolerance.Value;
@@ -346,7 +443,13 @@ namespace ApexCheatEnder.Core
                 }
             }
 
-            killer.LastKillTime = now;
+            // 排重时不要把时刻往后推 —— 否则连续重复上报会无限推迟，
+            // 反而把「真·冷却绕过」的判定基准冲掉。
+            if (!duplicateKill)
+            {
+                killer.LastKillTime = now;
+                if (victim != null) killer.LastKillVictimId = victim.PlayerId;
+            }
         }
 
         // ==================================================================
@@ -372,7 +475,7 @@ namespace ApexCheatEnder.Core
         /// <param name="absolutePositionTrusted">
         /// <paramref name="taskPosition"/> 是否可信到能做「绝对距离」判定。
         ///
-        /// 目前游戏只给得到 <c>PlayerTask.transform.position</c>，而好友房主现场日志
+        /// 游戏仅提供 <c>PlayerTask.transform.position</c>，而实测日志
         /// 证明它**不是任务交互点**：14 次远程任务命中的距离全部是同一个 5.82，
         /// 说明拿到的是任务对象自身的位置（还可能是多阶段任务的最后一步）。
         ///
@@ -393,7 +496,7 @@ namespace ApexCheatEnder.Core
 
             // ---------- 远程任务：提交时人不在任务点附近 ----------
             // 仅在任务点坐标可信时才判。拿不到可信坐标就不定罪 ——
-            // 现场那 14 条 5.82 全部来自不可信的 transform.position。
+            // 实测的 14 条命中（距离均为 5.82）全部来自不可信的 transform.position。
             if (absolutePositionTrusted)
             {
                 var distanceToTask = GameVec2.Distance(track.Current.Position, taskPosition);
@@ -461,13 +564,13 @@ namespace ApexCheatEnder.Core
 
             // ---- 两道闸，专门挡掉「入会传送」这个必然发生的位移 ----
             //
-            // 闸一：上一帧还不在会议里 → 这一帧就是入会那一跳，跳过。
+            // 第一道：上一帧不在会议中 → 本帧为入会传送，跳过。
             // 只判 Current.InMeeting 是不够的：入会样本本身 Current 已经是 true 了。
             if (!track.Previous.InMeeting) return;
 
             // 闸二：仍在合法传送豁免窗口内 → 跳过。
             // 会议开始时 OnMeetingStarted 会给所有人打上 LastLegalTeleportTime，
-            // 但这里以前根本没读它，豁免等于白设。
+            // 此前此处未读取该值，豁免实际未生效。
             if (track.IsInLegalTeleportWindow(now, MeetingEnterGrace)) return;
 
             if (now - track.LastMeetingMoveReportTime < MeetingMoveReportCooldown) return;
@@ -519,8 +622,8 @@ namespace ApexCheatEnder.Core
 
             // 非法使用通风管：按「角色能力」判定，而不是阵营。
             //
-            // 历史教训：早期用 !IsImpostor 判断，把 Viper（船员阵营、Role.CanVent=true）
-            // 和躲猫猫的 Seeker 一律判成 Critical 直接踢掉，是典型误杀。
+            // 早期实现使用 !IsImpostor 判定，误将 Viper（船员阵营、Role.CanVent=true）
+            // 与躲猫猫模式的 Seeker 一并判为 Critical 并踢出，属典型误判。
             // 现在要求：① 角色能力已知 ② 该角色确实没有通风能力 ③ 人还活着。
             // 角色信息拿不到时一律放行（宁可漏报，不可冤判）。
             if (_cfg.VentNonImpostor.Value &&

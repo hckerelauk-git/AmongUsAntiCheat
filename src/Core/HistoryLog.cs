@@ -42,10 +42,12 @@ namespace ApexCheatEnder.Core
             catch { }
         }
 
-        public static void RecordViolation(string playerName, int playerId, string kind, string detail)
+        public static void RecordViolation(string playerName, int playerId, string kind, string detail,
+            string identity = null)
         {
             if (!(AntiCheatRuntime.Config?.RecordCheatHistory.Value ?? false)) return;
-            Append("CheatHistory.txt", $"{playerName}({playerId}) 命中 {kind}：{detail}");
+            Append("CheatHistory.txt",
+                $"{playerName}({playerId}){identity} 命中 {kind}：{detail}");
         }
 
         private static void Append(string file, string line)

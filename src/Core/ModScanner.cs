@@ -148,7 +148,7 @@ namespace ApexCheatEnder.Core
             // 必须排在最前面，且必须按「程序集路径」判断。
             // 原因：作弊签名表（类型名、字符串标记）是编译进本 DLL 的，
             // 下面的深度匹配会在自己的 DLL 里搜到这些标记，把 ACE 自己判成
-            // AUM 之类的作弊软件。好友房主现场日志里确实出现了这种自我命中。
+            // AUM 等作弊软件。实测日志中确实出现过此类自我命中。
             if (IsSelf(plugin))
             {
                 report.TrustedPlugins.Add($"{display}（本插件自身）");
@@ -177,7 +177,7 @@ namespace ApexCheatEnder.Core
             var hit = MatchBlacklist(plugin, out var source);
             if (hit != null)
             {
-                // 命中来源必须如实写进证据：现场日志把文件深度匹配也标成
+                // 命中来源必须如实写入证据：实测日志曾将文件深度匹配标记为
                 // 「元数据匹配」，导致无法判断到底是名字撞了还是 DLL 里有真标记。
                 report.Violations.Add(BuildViolation(plugin, hit, source));
                 return;

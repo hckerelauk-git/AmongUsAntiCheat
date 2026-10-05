@@ -112,7 +112,8 @@ namespace ApexCheatEnder.UI
 
         private static void Hide()
         {
-            if (_root != null) _root.SetActive(false);
+            // 已经是隐藏态就别再调 SetActive —— 它每帧都会被调一次。
+            if (_root != null && _root.activeSelf) _root.SetActive(false);
         }
 
         private static void DestroyBuilt()

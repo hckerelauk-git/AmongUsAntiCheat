@@ -13,7 +13,7 @@ namespace ApexCheatEnder.Patches
     ///
     /// ────────────── 为什么必须有这一层 ──────────────
     ///
-    /// 好友房主的现场日志暴露了核心问题：ACE 的击杀 / 任务 / 管道 / 位置同步
+    /// 实测日志暴露出核心问题：ACE 的击杀 / 任务 / 通风管 / 位置同步
     /// 补丁全是 <c>Postfix</c> —— 动作**执行完之后**才收集证据。
     /// 于是「检测到了」和「拦住了」是两件事，玩家看到的是作弊照样生效。
     ///
@@ -65,7 +65,7 @@ namespace ApexCheatEnder.Patches
         /// 这样我们返回 false 时它的 Pop 正好配对，不会把外层栈帧弹掉。
         /// </summary>
         [HarmonyPriority(Priority.Low)]
-        private static bool Prefix(PlayerControl __instance, object[] __args)
+        private static bool Prefix(PlayerControl __instance, [HarmonyArgument(0)] byte callId)
         {
             if (!AntiCheatRuntime.IsReady || __instance == null) return true;
 
@@ -74,9 +74,6 @@ namespace ApexCheatEnder.Patches
                 // 非房主不拦：本机拦了也改不了别人的画面，只会造成表现不一致。
                 if (!GameBridge.IsHost) return true;
                 if (!GameBridge.IsInGame) return true;
-
-                var callId = ExtractCallId(__args);
-                if (callId < 0) return true;
 
                 switch ((RpcCalls)callId)
                 {
@@ -135,7 +132,7 @@ namespace ApexCheatEnder.Patches
             var now = Time.realtimeSinceStartup;
 
             // id<0 也必须进限频表：以前只在 id>=0 时记录，
-            // 拿不到玩家号的路径等于完全不限频，异常时会刷爆日志。
+            // 无法取得玩家号的路径等于完全未限频，异常时会刷满日志。
             // 玩家号正常都是 >=0，用 -1 当「未知」的哨兵值不会冲突。
             var key = id >= 0 ? id : UnknownPlayerKey;
             if (LastLogged.TryGetValue(key, out var last) && now - last < LogCooldown) return;
@@ -153,15 +150,5 @@ namespace ApexCheatEnder.Patches
         /// <summary>新回合清空限频表，避免字典随玩家数无限增长。</summary>
         public static void ResetLogState() => LastLogged.Clear();
 
-        private static int ExtractCallId(object[] args)
-        {
-            if (args == null) return -1;
-            foreach (var arg in args)
-            {
-                if (arg is byte b) return b;
-                if (arg is sbyte sb) return sb;
-            }
-            return -1;
-        }
     }
 }

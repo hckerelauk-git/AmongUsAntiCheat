@@ -175,7 +175,10 @@ namespace ApexCheatEnder.UI
             foreach (var s in Slots)
             {
                 if (!s.InUse) continue;
-                s.Rect.anchoredPosition = new Vector2(-Margin, Margin + stackIndex * (CardHeight + Gap));
+                // 同上：没挪位就别写 RectTransform，否则整个 Canvas 每帧重建。
+                var target = new Vector2(-Margin, Margin + stackIndex * (CardHeight + Gap));
+                if ((s.Rect.anchoredPosition - target).sqrMagnitude > 0.01f)
+                    s.Rect.anchoredPosition = target;
                 stackIndex++;
             }
         }

@@ -61,6 +61,32 @@ namespace ApexCheatEnder
         private const float RiskCheckInterval = 0.2f;
         private static float _nextRiskCheckTime;
 
+        /// <summary>封禁名单检查间隔。好友码不会中途变，1 秒一次足够。</summary>
+        private const float BanCheckInterval = 1.0f;
+
+        private static float _nextBanCheckTime;
+
+        /// <summary>
+        /// 本局已经报过的玩家。
+        ///
+        /// 名单检查每秒跑一次，没有这个集合就会**每秒提交一条重复证据** ——
+        /// 通知会被刷屏，证据条数也会虚高到毫无意义。
+        /// </summary>
+        private static readonly HashSet<int> BanReported = new HashSet<int>();
+
+        /// <summary>
+        /// 本局已经**查过**的玩家（命中与否都记）。
+        ///
+        /// 好友码不会在对局中途变，所以每人每局查一次就够。
+        /// 没有这个集合的话，每秒都要给每个人做一次字符串归一化 ——
+        /// 15 名玩家即每秒数十次分配，属纯开销。
+        /// </summary>
+        private static readonly HashSet<int> BanChecked = new HashSet<int>();
+
+        /// <summary>解析好的自定义名单，以及它对应的原始配置串（串没变就不重解析）。</summary>
+        private static List<BanEntry> _banExtra;
+        private static string _banExtraRaw;
+
         /// <summary>复用的玩家缓冲区：避免每次采样都分配一个列表。</summary>
         private static readonly List<PlayerControl> PlayerBuffer = new List<PlayerControl>(16);
 
@@ -138,7 +164,7 @@ namespace ApexCheatEnder
 
             if (changes == null || changes.Count == 0) return;
 
-            // 只弹第一条，避免用户一次改一堆时刷屏
+            // 仅弹出第一条，避免批量修改时刷屏
             var first = changes[0];
             var extra = changes.Count > 1 ? "（共 " + changes.Count + " 项）" : string.Empty;
 
@@ -235,7 +261,7 @@ namespace ApexCheatEnder
         ///
         /// 为什么不能只看「等级升级」：
         /// 一个玩家一旦升到高风险，之后所有作弊都还是高风险，等级不再变化，
-        /// 通知就再也不会弹 —— 现场表现就是「只爆一次，后面的作弊就不管了」。
+        /// 通知将不再弹出 —— 表现为「仅提示一次，后续作弊不再告警」。
         /// 加上第二条后，持续作弊的人会每隔几秒再提示一次，同时不会刷屏。
         /// </summary>
         private static void CheckRiskLevelChanges()
@@ -378,6 +404,72 @@ namespace ApexCheatEnder
             }
             _wasInGameAtPresence = inGame;
 
+            // 身份摘要：命中时记下好友码 / 平台 ID —— 没有它就无法封禁。
+            if (VerdictEngine.DescribeIdentity == null)
+                VerdictEngine.DescribeIdentity = id =>
+                {
+                    try
+                    {
+                        var p = GameBridge.GetPlayerById(id);
+                        if (p == null) return string.Empty;
+
+                        var code = GameBridge.GetFriendCode(p);
+                        var puid = GameBridge.GetPuid(p);
+
+                        var sb = new System.Text.StringBuilder();
+                        if (code.Length > 0) sb.Append(" 好友码=").Append(code);
+                        if (puid.Length > 0) sb.Append(" 平台ID=").Append(puid);
+
+                        // 模组指纹：把对方装了哪些模组一起记下来。
+                        // 「他开的是什么挂」这类问题，答案就在这里 ——
+                        // 指纹是按自定义 RPC 的 callId 被动观察到的，对方躲不掉。
+                        try
+                        {
+                            var mods = Core.ModFingerprint.Of(id);
+                            if (mods != null && mods.Count > 0)
+                            {
+                                var names = new System.Collections.Generic.List<string>(mods.Count);
+                                foreach (var m in mods)
+                                    if (m != null && !string.IsNullOrEmpty(m.Display)) names.Add(m.Display);
+
+                                if (names.Count > 0)
+                                    sb.Append(" 模组=").Append(string.Join("+", names));
+                            }
+                        }
+                        catch { }
+
+                        return sb.ToString();
+                    }
+                    catch { return string.Empty; }
+                };
+
+            // 位移诊断：按玩家号取状态摘要。核心层不引用 GameBridge，由这里注入。
+            if (Analyzer != null && BehaviorAnalyzer.DescribeState == null)
+                BehaviorAnalyzer.DescribeState = id =>
+                {
+                    try
+                    {
+                        var p = GameBridge.GetPlayerById(id);
+                        return p == null ? "<未找到玩家>" : GameBridge.DescribeMotionState(p);
+                    }
+                    catch { return "<读取失败>"; }
+                };
+
+            // 核心层不引用运行时，日志钩子在这里安装。
+            if (BanListRemote.LogInfo == null)
+            {
+                BanListRemote.LogInfo = m => Log?.LogInfo(m);
+                BanListRemote.LogWarning = m => Log?.LogWarning(m);
+            }
+
+            // 在线名单：**必须放在「是否在对局中」判断之前**。
+            // 放在 CheckBanList 里会导致只有进对局才拉取，而玩家通常先进大厅再进房，
+            // 名单永远来不及准备好 —— 表现为「功能未生效」，但日志里一条错都没有。
+            BanListRemote.Tick(now,
+                Config.EnableRemoteBanList.Value,
+                Config.BanListEndpoint.Value,
+                Config.BanListRefreshHours.Value * 60f);
+
             if (!inGame)
             {
                 // 不在对局中也要驱动，保持调用方契约
@@ -394,6 +486,9 @@ namespace ApexCheatEnder
                 SampleAllPlayers(now, inMeeting);
             }
 
+            // 封禁名单：只看身份、不看行为，所以和采样分开走
+            CheckBanList(now);
+
             // 衰减
             Verdicts.Tick(now, deltaTime);
 
@@ -402,6 +497,89 @@ namespace ApexCheatEnder
             {
                 _nextRiskCheckTime = now + RiskCheckInterval;
                 CheckRiskLevelChanges();
+            }
+        }
+
+        // ================= 封禁名单 =================
+
+        /// <summary>
+        /// 对照封禁名单检查房间里每个人。
+        ///
+        /// 与其它检测最大的不同：**不看行为、只看身份** ——
+        /// 命中依据是好友码 / 平台 ID（改名甩不掉），而不是名字。
+        ///
+        /// 命中后提交一条确定级证据，之后的警告 / 踢出 / 封禁**全部沿用现有处置设置**，
+        /// 不另开一套逻辑。这样「封禁名单」就只是又一个证据来源，
+        /// 处置规则只有一处，不会出现两套规则打架。
+        /// </summary>
+        private static void CheckBanList(float now)
+        {
+            if (!Config.EnableBanList.Value) return;
+            if (now < _nextBanCheckTime) return;
+            _nextBanCheckTime = now + BanCheckInterval;
+
+            try
+            {
+                // 配置串变了才重新解析 —— 每秒解析一次字符串是纯浪费
+                var raw = Config.BanListExtra.Value ?? string.Empty;
+                if (!System.String.Equals(raw, _banExtraRaw, System.StringComparison.Ordinal))
+                {
+                    _banExtraRaw = raw;
+                    _banExtra = BanListDb.Parse(raw);
+                    // 名单变了要重查一遍，否则新加的条目对本局已查过的人不生效
+                    BanChecked.Clear();
+                    if (_banExtra.Count > 0)
+                        Log?.LogInfo("[封禁名单] 已载入自定义条目 " + _banExtra.Count + " 条。");
+                }
+
+                GameBridge.GetPlayersInto(PlayerBuffer);
+
+                for (var i = 0; i < PlayerBuffer.Count; i++)
+                {
+                    var player = PlayerBuffer[i];
+                    if (player == null) continue;
+
+                    var id = GameBridge.GetPlayerId(player);
+                    if (id < 0 || BanChecked.Contains(id)) continue;
+
+                    // 先记「查过」，再决定要不要跳过 ——
+                    // 否则被跳过的人下一秒又会被重新归一化一遍。
+                    BanChecked.Add(id);
+
+                    // **绝不判自己。**
+                    // 名单里有「鸟（繁体）」这种只有名字的条目，万一自己名字里带了同样的词，
+                    // 将导致对自己执行警告或踢出。
+                    if (player == GameBridge.GetLocalPlayer()) continue;
+
+                    var name = GameBridge.GetPlayerName(player);
+                    var code = GameBridge.GetFriendCode(player);
+                    var puid = GameBridge.GetPuid(player);
+
+                    if (!BanListDb.Check(code, puid, name, _banExtra, BanListRemote.Entries, out var hit)) continue;
+                    if (BanReported.Contains(id)) continue;
+
+                    BanReported.Add(id);
+
+                    var detail = "命中封禁名单「" + hit.Name + "」" +
+                                 (string.IsNullOrEmpty(hit.Code) ? string.Empty : "（好友码 " + hit.Code + "）") +
+                                 (string.IsNullOrEmpty(hit.Puid) ? string.Empty : "（平台ID " + hit.Puid + "）") +
+                                 "：" + hit.Reason;
+
+                    Verdicts.Submit(new Violation(
+                        ViolationKind.BannedPlayer,
+                        Severity.Critical,
+                        id,
+                        name,
+                        now,
+                        detail), now);
+
+                    Log?.LogWarning("[封禁名单] " + name + "（id=" + id + "）命中「" + hit.Name + "」：" + hit.Reason);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                if (Config.VerboseLogging.Value)
+                    Log?.LogWarning("[封禁名单] 检查失败：" + ex.Message);
             }
         }
 
@@ -426,6 +604,19 @@ namespace ApexCheatEnder
             var deadEvery = System.Math.Max(1, Config.PerfDeadSkipFrames.Value);
             var skipThisTick = deadEvery > 1 && (_sampleTick % deadEvery) != 0;
 
+            var teleportThreshold = Config.TeleportMinDistance.Value;
+
+            // ══════════ 第一遍：推快照，并统计本帧有多少人发生「大位移」 ══════════
+            //
+            // 会议开始、回合开始这类**场景级传送**会把所有人一起挪走，那不是任何一个人的行为。
+            // 而且这类传送比游戏状态**早一帧** —— 实测诊断日志：
+            //   inVent=0 onLadder=0 inMovingPlat=0 dead=0 inMeeting=0
+            //   紧接着下一行才是「会议开始，已对所有玩家开启位置豁免窗口」
+            // 于是整桌人都可能被逐个判成瞬移。
+            //
+            // 逐人判定看不出这种情况，必须在批次层面看：一帧里多人同时大位移 = 场景传送。
+            var bigMovers = 0;
+
             foreach (var player in PlayerBuffer)
             {
                 if (player == null) continue;
@@ -436,14 +627,13 @@ namespace ApexCheatEnder
                 var isDead = GameBridge.IsDead(player);
                 if (skipDead && isDead && skipThisTick) continue;
 
-                var name = GameBridge.GetPlayerName(player);
-                var track = Tracker.GetOrCreate(playerId, name, now);
+                var track = Tracker.GetOrCreate(playerId, GameBridge.GetPlayerName(player), now);
 
                 // 角色能力：用 Role.CanVent 而不是阵营，避免把 Viper 这类
                 // 「船员阵营但能钻管道」的角色误判成作弊。
                 var roleKnown = GameBridge.TryGetCanVent(player, out var canVent);
 
-                var snapshot = new PlayerSnapshot
+                track.Push(new PlayerSnapshot
                 {
                     Time = now,
                     Position = GameBridge.GetPosition(player),
@@ -455,17 +645,41 @@ namespace ApexCheatEnder
                     RoleKnown = roleKnown,
                     CanMove = GameBridge.CanMove(player),
                     InMeeting = inMeeting,
-                };
+                });
 
-                track.Push(snapshot);
+                if (!isDead && track.Current.DeltaDistance >= teleportThreshold) bigMovers++;
+            }
+
+            // 两人及以上同时大位移 → 场景传送，整批开豁免窗口。
+            // 单人瞬移（真正的作弊）不会命中这条 —— 那才是我们要抓的。
+            if (bigMovers >= 2)
+            {
+                foreach (var t in Tracker.Tracks.Values) t.LastLegalTeleportTime = now;
+
+                if (Config.VerboseLogging.Value)
+                    Log?.LogInfo("[反作弊] 本帧 " + bigMovers + " 人同时大位移，判定为场景传送，整批豁免。");
+            }
+
+            // ══════════ 第二遍：逐人分析 ══════════
+            foreach (var player in PlayerBuffer)
+            {
+                if (player == null) continue;
+
+                var playerId = GameBridge.GetPlayerId(player);
+                if (playerId < 0) continue;
+
+                var isDead = GameBridge.IsDead(player);
+                if (skipDead && isDead && skipThisTick) continue;
 
                 // 鬼魂不参与移动类判定：死亡后穿墙、移动规则与活人完全不同，
                 // 拿活人的阈值去套必然误报。
                 if (isDead) continue;
 
+                if (!Tracker.TryGet(playerId, out var track) || track == null) continue;
+
                 // 速度上限必须按「这个玩家自己」算。
                 // 用本机玩家的 TrueSpeed 套所有人是错的 —— 鬼魂和活人的理论速度不同，
-                // 现场就是拿一个值去套全场，把 3 倍速大厅里的正常玩家判成了超速。
+                // 该做法以单一阈值套用全场，会把 3 倍速大厅中的正常玩家判为超速。
                 var maxSpeed = fallbackMaxSpeed;
                 var ownSpeed = GameBridge.GetMaxAllowedSpeed(player);
                 if (ownSpeed > 0.01f) maxSpeed = ownSpeed * tolerance;
@@ -477,7 +691,6 @@ namespace ApexCheatEnder
                 if (inMeeting) Analyzer.AnalyzeMeetingMovement(track, now, EvidenceBuffer);
 
                 foreach (var v in EvidenceBuffer) Verdicts.Submit(v, now);
-
             }
         }
 
@@ -490,6 +703,9 @@ namespace ApexCheatEnder
 
             Tracker.Clear();
             Verdicts.ResetForNewRound();
+            // 名单检查的两张表都按 PlayerId 记，每局 PlayerId 重新分配，必须清掉
+            BanReported.Clear();
+            BanChecked.Clear();
             // 拦截层的限频表按玩家 id 累积，新回合必须清掉，否则跨局会残留。
             Patches.RpcGuardPatch.ResetLogState();
             GameBridge.InvalidateLayerCache();

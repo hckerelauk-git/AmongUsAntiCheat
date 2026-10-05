@@ -37,7 +37,17 @@ namespace ApexCheatEnder.Core.Rpc
 
             if (now < window.BlockUntil) return true;
 
-            var limit = Math.Max(5, cfg.RpcRateLimit?.Value ?? 60);
+            // **加载 / 大厅阶段给一倍的余量。**
+            //
+            // 现场：三人同时在「加载/大厅」阶段被判 61 个 RPC（阈值 60）——
+            //   ① 超出只有 1~4 个，正好压在阈值上；
+            //   ② 三个人**速率完全相同、最近类型也相同（164）**；
+            //   ③ 阶段是加载/大厅。
+            //
+            // 三条合起来说明那是某个模组的**周期性广播**，不是洪水攻击：
+            // 攻击不会三个人约好用同一个速率。而大厅阶段本来就有大量合法的
+            // 位置 / 外观 / 准备状态同步，阈值卡在 60 会让正常流量刚好压线。
+            var limit = Math.Max(5, cfg.RpcRateLimit?.Value ?? 60) * (loading ? 2 : 1);
             const float seconds = 10f;
             window.Times.Enqueue(now);
             while (window.Times.Count > 0 && now - window.Times.Peek() > seconds)

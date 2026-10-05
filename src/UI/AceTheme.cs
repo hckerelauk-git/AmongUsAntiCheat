@@ -58,7 +58,14 @@ namespace ApexCheatEnder.UI
         public static readonly Color TabColumnBg = new Color32(0x0E, 0x18, 0x28, 0xF6);
 
         /// <summary>页签选中态底色。</summary>
-        public static readonly Color TabActiveBg = new Color32(0x2E, 0xE6, 0xD6, 0x24);
+        /// <summary>
+        /// 选中标签的背景。
+        ///
+        /// 原来是 alpha 0x24（14%），实际观感是「几乎看不见」——
+        /// 用户分不清当前在哪个标签上，只能靠左侧那条 3px 竖条猜。
+        /// 抬到 0x3D（24%）之后选中态才真正立得住。
+        /// </summary>
+        public static readonly Color TabActiveBg = new Color32(0x2E, 0xE6, 0xD6, 0x3D);
 
         /// <summary>
         /// 设置行底板（两种交替，制造斑马纹便于横向读行）。
@@ -116,7 +123,7 @@ namespace ApexCheatEnder.UI
         /// 生成「圆角矩形 + 描边」的 **9 宫格 Sprite**。
         ///
         /// 为什么必须用 9 宫格：
-        ///   uGUI 的 Image 直接拉伸一张圆角贴图，圆角会被拉成椭圆 —— 尺寸一变就露馅。
+        ///   uGUI 的 Image 直接拉伸圆角贴图会将圆角拉成椭圆 —— 尺寸变化即暴露。
         ///   Sprite.Create 传 border 参数后，Unity 只拉伸中间区域、四个角保持原样，
         ///   于是一张 64×64 的小图能适配任意尺寸的卡片，圆角永远不变形。
         ///   这是「看起来做过设计」和「看起来是程序员拉的方块」之间最关键的一步。
@@ -296,7 +303,7 @@ namespace ApexCheatEnder.UI
         /// <summary>
         /// 带缓存的几何图标。
         /// 返回 Texture2D（而非 Sprite）：图标是固定尺寸的实心图形，
-        /// 不需要 9 宫格拉伸，直接给 Image 当贴图用最省事。
+        /// 无需 9 宫格拉伸，直接作为 Image 贴图使用最简。
         /// </summary>
         public static Texture2D Glyph(GlyphShape shape, int size, Color color)
         {
@@ -482,7 +489,7 @@ namespace ApexCheatEnder.UI
                 var freq = Mathf.Lerp(startFreq, endFreq, t);
                 phase += 2f * Mathf.PI * freq / SampleRate;
 
-                // 指数衰减包络：起音干脆、尾部干净
+                // 指数衰减包络：起音迅速、尾部干净
                 var envelope = Mathf.Exp(-4f * t) * Mathf.Min(1f, t * 40f);
 
                 data[i] = Mathf.Sin(phase) * envelope * volume;
@@ -549,7 +556,7 @@ namespace ApexCheatEnder.UI
         /// 生成键帽纹理（快捷键提示用）。
         ///
         /// Amethyst 用键帽而不是纯文本写快捷键。键帽的立体感来自
-        /// 「上表面 + 下沿阴影」两层，这里直接把下沿画进同一张贴图，
+        /// 「上表面 + 下沿阴影」两层，此处将下沿绘制在同一张贴图中，
         /// 避免为每个键帽多挂一个 Image。
         /// </summary>
         /// <param name="w">键帽宽（像素）。</param>

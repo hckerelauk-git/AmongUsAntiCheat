@@ -76,13 +76,15 @@ namespace ApexCheatEnder.Tests
             var mapping = "Teleport=网络;SpeedHack=会议;Unknown=x";
             var original = RuleGroups.Resolve(ViolationKind.Teleport, mapping);
             var seen = new HashSet<string>();
-            for (var i = 0; i < 6; i++)
+            // 从 Names.Length 推导，不写死组数 —— 以后加分组这个测试不该跟着挂
+            for (var i = 0; i < RuleGroups.Names.Length; i++)
             {
                 mapping = RuleGroups.Cycle(ViolationKind.Teleport, mapping);
                 seen.Add(RuleGroups.Resolve(ViolationKind.Teleport, mapping));
                 Check(RuleGroups.Resolve(ViolationKind.SpeedHack, mapping) == "会议", "编辑不改其他映射");
             }
-            Check(seen.Count == 6 && RuleGroups.Resolve(ViolationKind.Teleport, mapping) == original, "六组完整循环");
+            Check(seen.Count == RuleGroups.Names.Length && RuleGroups.Resolve(ViolationKind.Teleport, mapping) == original,
+                "全部 " + RuleGroups.Names.Length + " 组完整循环后回到原值");
             Check(RuleGroups.Resolve(ViolationKind.Teleport, "Teleport=非法") == "移动", "非法映射回退");
             Check(RuleGroups.Resolve(ViolationKind.Teleport, new string('x', 8193)) == "移动", "超长映射回退");
             var history = new LocalEventHistory();
@@ -91,7 +93,10 @@ namespace ApexCheatEnder.Tests
             Check(RuleGroups.Filter(history, 1, mapping).Length == 0, "不再按内置移动组过滤");
             Check(RuleGroups.Filter(history, 0, mapping).Length == 1, "全部历史");
             var ui = Source("UI/SettingsWindow.cs");
-            Check(ui.Contains("cfg.RuleGroupMapping.Value = RuleGroups.Cycle") && ui.Contains("RuleGroups.Filter("), "编辑和历史使用同一映射");
+            // 规则分组不再在界面里逐条编辑 —— 把 40 多条规则各占一行太啰嗦，
+            // 而且几乎没人会改。要调就改配置文件，历史过滤仍然读同一个映射。
+            Check(ui.Contains("RuleGroups.Filter("), "历史必须按配置的映射过滤");
+            Check(!ui.Contains("RuleGroups.Cycle("), "界面不再逐条列出全部规则");
         }
 
         internal static void ConfigSafety()

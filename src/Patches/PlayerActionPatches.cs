@@ -79,7 +79,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "MurderPlayer");
 
-        private static void Postfix(PlayerControl __instance, object[] __args)
+        private static void Postfix(PlayerControl __instance, [HarmonyArgument(0)] PlayerControl target)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -102,7 +102,7 @@ namespace ApexCheatEnder.Patches
                 }
 
                 // 从参数里找受害者
-                var victimControl = PatchHelper.FirstArgOfType<PlayerControl>(__args);
+                var victimControl = target;
                 PlayerTrack victim = null;
                 if (victimControl != null)
                 {
@@ -140,7 +140,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "CompleteTask");
 
-        private static void Postfix(PlayerControl __instance, object[] __args)
+        private static void Postfix(PlayerControl __instance, [HarmonyArgument(0)] uint taskIdx)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -153,16 +153,13 @@ namespace ApexCheatEnder.Patches
 
                 var track = AntiCheatRuntime.GetOrCreateTrack(playerId, GameBridge.GetPlayerName(__instance));
 
-                // 从参数里取任务 Id（uint），据此定位任务点
+                // 任务 Id 现为强类型参数，即第一个实参，无需推断。
                 var taskPosition = track.Current.Position;
-                if (__args != null && __args.Length > 0)
+                var taskId = TryExtractTaskId(taskIdx);
+                if (taskId >= 0)
                 {
-                    var taskId = TryExtractTaskId(__args[0]);
-                    if (taskId >= 0)
-                    {
-                        var resolved = GameBridge.GetTaskPosition(__instance, taskId);
-                        if (resolved.HasValue) taskPosition = resolved.Value;
-                    }
+                    var resolved = GameBridge.GetTaskPosition(__instance, taskId);
+                    if (resolved.HasValue) taskPosition = resolved.Value;
                 }
 
                 var maxSpeed = GameBridge.GetMaxAllowedSpeed(__instance)
@@ -171,7 +168,7 @@ namespace ApexCheatEnder.Patches
                 var buffer = new List<Violation>(4);
 
                 // absolutePositionTrusted 传 false：游戏只给得到 PlayerTask.transform.position，
-                // 现场日志证明它不是任务交互点（14 次命中距离全是同一个 5.82）。
+                // 实测日志表明它不是任务交互点（14 次命中距离均为 5.82）。
                 // 传 false 后只保留「任务速度」这类相对位移判定 —— 固定偏移在相减时抵消，
                 // 而「远程任务」这类绝对距离判定不再产出误报。
                 AntiCheatRuntime.Analyzer.AnalyzeTask(track, taskPosition, Time.time, maxSpeed, buffer,
@@ -209,7 +206,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(Vent), "EnterVent");
 
-        private static void Postfix(Vent __instance, object[] __args)
+        private static void Postfix(Vent __instance, [HarmonyArgument(0)] PlayerControl pc)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -217,7 +214,7 @@ namespace ApexCheatEnder.Patches
             {
                 if (!AntiCheatRuntime.IsReady) return;
 
-                var player = PatchHelper.FirstArgOfType<PlayerControl>(__args);
+                var player = pc;
                 if (player == null) return;
 
                 var playerId = GameBridge.GetPlayerId(player);
@@ -225,7 +222,7 @@ namespace ApexCheatEnder.Patches
 
                 var track = AntiCheatRuntime.GetOrCreateTrack(playerId, GameBridge.GetPlayerName(player));
 
-                // 通风管本体就是 __instance
+                // 通风管实例即 __instance
                 var ventPos = track.Current.Position;
                 if (__instance != null)
                 {
@@ -260,20 +257,13 @@ namespace ApexCheatEnder.Patches
             return type == null ? null : PatchHelper.FindByName(type, "HandleRpc");
         }
 
-        private static bool Prefix(PlayerControl __instance, object[] __args)
+        private static bool Prefix(PlayerControl __instance, [HarmonyArgument(0)] byte callId)
         {
             if (!AntiCheatRuntime.IsReady || __instance == null) return true;
             try
             {
                 var id = GameBridge.GetPlayerId(__instance);
                 if (id < 0) return true;
-                byte callId = 0;
-                foreach (var arg in __args ?? Array.Empty<object>())
-                {
-                    if (arg is byte b) { callId = b; break; }
-                    if (arg is sbyte sb) { callId = (byte)sb; break; }
-                    if (arg is int i) { callId = (byte)i; break; }
-                }
 
                 var inLoadingOrLobby = !GameBridge.IsInGame ||
                     AmongUsClient.Instance == null || !AmongUsClient.Instance.IsGameStarted;
@@ -296,9 +286,9 @@ namespace ApexCheatEnder.Patches
     /// <summary>
     /// 记录位置强制同步（RpcSnapTo）的频率。
     ///
-    /// 刻意不把 SnapTo 当作瞬移豁免——作弊者的瞬移恰恰就是靠它实现的。
+    /// 刻意不将 SnapTo 作为瞬移豁免 —— 作弊者的瞬移正是通过它实现。
     /// 正确做法是统计频率：正常对局中它极少发生（只在网络严重卡顿时），
-    /// 而作弊者会持续触发。短时间内高频 SnapTo 本身就是强证据。
+    /// 而作弊者会持续触发。短时间高频 SnapTo 本身即为强证据。
     /// </summary>
     [HarmonyPatch]
     internal static class SnapToPatch
@@ -333,7 +323,7 @@ namespace ApexCheatEnder.Patches
             return t == null ? null : PatchHelper.FindByName(t, "RpcSnapTo");
         }
 
-        private static void Postfix(object __instance, object[] __args)
+        private static void Postfix(object __instance)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 

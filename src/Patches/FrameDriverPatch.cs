@@ -10,7 +10,7 @@ namespace ApexCheatEnder.Patches
     /// 为什么不用自定义 MonoBehaviour 的 Update：
     /// 动态注册进 il2cpp 的托管组件收不到 Unity 每帧分发的消息
     /// （Awake 会在 AddComponent 时同步触发，Update 不会），
-    /// 实测表现就是插件加载成功、日志正常，但面板永远不出现。
+    /// 实测表现为插件加载成功、日志正常，但面板始终不出现。
     ///
     /// 现在改为 patch 原生方法，并同时挂三个入口互为冗余：
     ///   1. Canvas.SendWillRenderCanvases  每帧静态方法，启动到退出一直存在（主入口）

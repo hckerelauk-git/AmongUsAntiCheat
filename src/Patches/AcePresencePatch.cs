@@ -22,19 +22,23 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "HandleRpc");
 
-        private static bool Prefix(PlayerControl __instance, object[] __args)
+        /// <summary>
+        /// **参数必须强类型声明，不能用 <c>object[] __args</c>。**
+        ///
+        /// HandleRpc 是每个 RPC 都要跑的方法，对局中每秒几十到上百次。
+        /// 用 <c>object[] __args</c> 时 Harmony 每次调用都要
+        /// **新建一个 object 数组 + 把每个参数装箱** —— 纯粹的垃圾，
+        /// 累积后触发 GC，表现为周期性掉帧。
+        ///
+        /// 强类型参数直接读 IL 实参，零分配、零装箱，
+        /// 热路径上只剩一次 byte 比较。
+        /// </summary>
+        private static bool Prefix(PlayerControl __instance,
+            [HarmonyArgument(0)] byte callId,
+            [HarmonyArgument(1)] MessageReader reader)
         {
             try
             {
-                byte callId = 0;
-                MessageReader reader = null;
-
-                foreach (var arg in __args ?? Array.Empty<object>())
-                {
-                    if (arg is byte b) { callId = b; continue; }
-                    if (arg is MessageReader r) reader = r;
-                }
-
                 // 不是我们的 callId，直接放行，不做任何多余判断
                 if (callId != AcePresence.MagicCallId) return true;
 

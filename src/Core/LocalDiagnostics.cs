@@ -70,7 +70,7 @@ namespace ApexCheatEnder.Core
 
     internal static class RuleGroups
     {
-        public static readonly string[] Names = { "移动", "动作", "会议", "消息", "网络", "静态" };
+        public static readonly string[] Names = { "移动", "动作", "会议", "消息", "网络", "静态", "名单" };
         public static string Default(ViolationKind kind)
         {
             switch (kind)
@@ -80,6 +80,8 @@ namespace ApexCheatEnder.Core
                 case ViolationKind.ChatFlood: case ViolationKind.IllegalChat: case ViolationKind.IllegalName: return Names[3];
                 case ViolationKind.InvalidRpc: case ViolationKind.StateDesync: case ViolationKind.OversizedPacket: return Names[4];
                 case ViolationKind.KnownCheatPlugin: case ViolationKind.UnknownPlugin: case ViolationKind.MemoryTamper: return Names[5];
+                // 名单单独一组：它不是「检测到的行为」，是事先认定的人，混进「静态」会看不出来
+                case ViolationKind.BannedPlayer: return Names[6];
                 default: return Names[1];
             }
         }

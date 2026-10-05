@@ -4,6 +4,7 @@ using System.Reflection;
 using AmongUs.GameOptions;
 using ApexCheatEnder.Core;
 using HarmonyLib;
+using Hazel;
 using UnityEngine;
 
 namespace ApexCheatEnder.Patches
@@ -67,12 +68,10 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "HandleRpc");
 
-        private static void Prefix(PlayerControl __instance, object[] __args)
+        private static void Prefix(PlayerControl __instance, [HarmonyArgument(0)] byte callId)
         {
             try
             {
-                var callId = ExtractCallId(__args);
-
                 // 模组指纹：超出原版 RpcCalls 范围（>67）的 callId 一定是模组发的。
                 // 挂在这里是因为 HandleRpc 的 Prefix 能看到**每一个** RPC 及其发送者。
                 // Observe 对原版范围内的 callId 立即返回，热路径开销可忽略。
@@ -93,17 +92,6 @@ namespace ApexCheatEnder.Patches
             try { RpcContext.Pop(); } catch { }
         }
 
-        private static int ExtractCallId(object[] args)
-        {
-            if (args == null) return -1;
-            foreach (var a in args)
-            {
-                if (a is byte b) return b;
-                if (a is sbyte sb) return sb;
-                if (a is int i) return i;
-            }
-            return -1;
-        }
     }
 
     // ======================================================================
@@ -120,7 +108,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(ShipStatus), "UpdateSystem");
 
-        private static void Postfix(object[] __args)
+        private static void Postfix([HarmonyArgument(0)] SystemTypes systemType)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -128,15 +116,15 @@ namespace ApexCheatEnder.Patches
             {
                 if (!AntiCheatRuntime.IsReady) return;
 
-                // ── 归因必须先确认「栈顶那条 RPC 就是 UpdateSystem」 ──
+                // ── 归因前必须确认「栈顶 RPC 为 UpdateSystem」 ──
                 //
                 // RpcContext 记的是「当前正在处理的 RPC」，不是「当前这个方法是被谁调的」。
                 // 而 ShipStatus.UpdateSystem 既可能由 UpdateSystem 这条 RPC 触发，
                 // 也可能在处理**别的** RPC（比如击杀）途中被游戏内部调用。
                 //
-                // 不做这个判断的话，后者会被算成「这个杀人的人搞破坏」——
-                // 现场日志里就是这样：一次击杀同时报了 KillWhileNotImpostor 和
-                // SabotageWhileNotImpostor，用户看到的就是「明明是杀人却报了破坏」。
+                // 缺少该判断时，后者会被归因为「击杀者实施破坏」——
+                // 实测日志即为此情况：一次击杀同时上报 KillWhileNotImpostor 与
+                // SabotageWhileNotImpostor，表现为「击杀却上报破坏」。
                 //
                 // 栈空（本地调用，非 RPC）时 CallId 为 -1，同样不归因 ——
                 // 本地调用是本机自己的行为，本来也不该算到别人头上。
@@ -145,7 +133,9 @@ namespace ApexCheatEnder.Patches
                 var track = RpcContext.SenderTrack();
                 if (track == null) return;
 
-                var systemId = ExtractFirstNumeric(__args);
+                // 强类型参数即为第一个实参（SystemTypes 枚举），
+                // 不必再从装箱数组里「猜哪个是数字」。
+                var systemId = (int)systemType;
                 var systemName = SystemNameOf(systemId);
 
                 var sender = RpcContext.Sender;
@@ -183,24 +173,6 @@ namespace ApexCheatEnder.Patches
                 catch { _systemTypeCount = 0; }
                 return _systemTypeCount;
             }
-        }
-
-        private static int ExtractFirstNumeric(object[] args)
-        {
-            if (args == null) return -1;
-            foreach (var a in args)
-            {
-                if (a is byte b) return b;
-                if (a is sbyte sb) return sb;
-                if (a is int i) return i;
-                if (a == null) continue;
-                var t = a.GetType();
-                if (t.IsEnum)
-                {
-                    try { return Convert.ToInt32(a); } catch { }
-                }
-            }
-            return -1;
         }
 
         private static string SystemNameOf(int id)
@@ -260,7 +232,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "RpcSendChat");
 
-        private static void Postfix(PlayerControl __instance, object[] __args)
+        private static void Postfix(PlayerControl __instance, [HarmonyArgument(0)] string text)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -272,7 +244,6 @@ namespace ApexCheatEnder.Patches
                 if (id < 0) return;
 
                 var track = AntiCheatRuntime.GetOrCreateTrack(id, GameBridge.GetPlayerName(__instance));
-                var text = PatchHelper.FirstArgOfType<string>(__args);
 
                 var buffer = new List<Violation>(2);
                 AntiCheatRuntime.Analyzer.AnalyzeChat(track, text, Time.time, buffer);
@@ -290,11 +261,12 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(ChatController), "AddChat");
 
-        private static void Postfix(object[] __args)
+        private static void Postfix(
+            [HarmonyArgument(0)] PlayerControl sourcePlayer,
+            [HarmonyArgument(1)] string chatText)
         {
             PatchHelper.Safe(() => UI.ChatAbuseNotice.Observe(
-                GameBridge.GetPlayerId(PatchHelper.FirstArgOfType<PlayerControl>(__args)),
-                PatchHelper.FirstArgOfType<string>(__args)));
+                GameBridge.GetPlayerId(sourcePlayer), chatText));
         }
     }
 
@@ -309,7 +281,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "RpcSetName");
 
-        private static void Postfix(PlayerControl __instance, object[] __args)
+        private static void Postfix(PlayerControl __instance, [HarmonyArgument(0)] string raw)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -320,7 +292,6 @@ namespace ApexCheatEnder.Patches
                 var id = GameBridge.GetPlayerId(__instance);
                 if (id < 0) return;
 
-                var raw = PatchHelper.FirstArgOfType<string>(__args);
                 var track = AntiCheatRuntime.GetOrCreateTrack(id, GameBridge.GetPlayerName(__instance));
 
                 var buffer = new List<Violation>(2);
@@ -419,7 +390,7 @@ namespace ApexCheatEnder.Patches
         private static MethodBase TargetMethod() =>
             PatchHelper.FindByName(typeof(PlayerControl), "RpcEnterVent");
 
-        private static void Postfix(PlayerControl __instance, object[] __args)
+        private static void Postfix(PlayerControl __instance, [HarmonyArgument(0)] int ventId)
         {
             if (!AntiCheatPlugin.EventScanEnabled) return;
 
@@ -431,13 +402,6 @@ namespace ApexCheatEnder.Patches
                 if (id < 0) return;
 
                 var track = AntiCheatRuntime.GetOrCreateTrack(id, GameBridge.GetPlayerName(__instance));
-
-                var ventId = -1;
-                foreach (var a in __args ?? Array.Empty<object>())
-                {
-                    if (a is int i) { ventId = i; break; }
-                    if (a is byte b) { ventId = b; break; }
-                }
 
                 var valid = ventId >= 0 ? GameBridge.IsValidVentId(ventId) : (bool?)null;
 
@@ -533,41 +497,34 @@ namespace ApexCheatEnder.Patches
     {
         private const int DefaultLimit = 1400;
 
-        private static PropertyInfo _lengthProp;
-        private static bool _lengthResolved;
-
         private static MethodBase TargetMethod()
         {
             var t = AccessTools.TypeByName("InnerNetClient");
             return t == null ? null : PatchHelper.FindByName(t, "HandleGameData");
         }
 
-        private static bool Prefix(object[] __args)
+        /// <summary>
+        /// **这里原来是全项目最贵的一处热路径。**
+        ///
+        /// HandleGameData 对**每个网络包**都会执行，且该检测**默认开启**。
+        /// 原来的实现每个包都要：
+        ///   1. <c>object[] __args</c> —— Harmony 建数组 + 装箱
+        ///   2. <c>a.GetType().Name == "MessageReader"</c> —— 反射取类型名再比字符串
+        ///   3. <c>PropertyInfo.GetValue(reader)</c> —— 反射取值
+        ///
+        /// 三样全是纯浪费。现在改成强类型参数 + 直接读属性，
+        /// 每个包只剩一次 <c>reader.Length</c> 读取。
+        /// </summary>
+        private static bool Prefix([HarmonyArgument(0)] MessageReader reader)
         {
             try
             {
                 if (!AntiCheatPlugin.EventScanEnabled) return true;
                 if (!AntiCheatRuntime.IsReady) return true;
                 if (!(AntiCheatRuntime.Config?.OversizedPacketCheck.Value ?? false)) return true;
-
-                object reader = null;
-                foreach (var a in __args ?? Array.Empty<object>())
-                {
-                    if (a != null && a.GetType().Name == "MessageReader") { reader = a; break; }
-                }
                 if (reader == null) return true;
 
-                if (!_lengthResolved)
-                {
-                    _lengthResolved = true;
-                    try { _lengthProp = reader.GetType().GetProperty("Length"); }
-                    catch { _lengthProp = null; }
-                }
-                if (_lengthProp == null) return true;
-
-                var raw = _lengthProp.GetValue(reader);
-                if (raw == null) return true;
-                var size = Convert.ToInt32(raw);
+                var size = reader.Length;
 
                 if (size <= DefaultLimit) return true;
 

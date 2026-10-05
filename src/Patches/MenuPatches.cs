@@ -5,7 +5,7 @@ using ApexCheatEnder.UI;
 
 namespace ApexCheatEnder.Patches
 {
-    // Start 记录当前菜单，持续刷新与离场清理由已有 Canvas 主线程驱动。
+    // Start 记录当前菜单，Update 每帧驱动 Tick。
     [HarmonyPatch]
     internal static class MainMenuArtStartPatch
     {
@@ -15,9 +15,23 @@ namespace ApexCheatEnder.Patches
         {
             PatchHelper.Safe(() =>
             {
-                var component = __instance as Component;
-                if (component != null) MainMenuArt.Apply(component.transform);
+                var menu = __instance as MainMenuManager;
+                if (menu != null) MainMenuArt.Apply(menu);
             });
+        }
+    }
+
+    /// <summary>
+    /// 每帧驱动主菜单背景的持续检查（重申渲染器关闭状态、透明色维持）。
+    /// </summary>
+    [HarmonyPatch]
+    internal static class MainMenuArtUpdatePatch
+    {
+        private static MethodBase TargetMethod() => PatchHelper.FindByName(typeof(MainMenuManager), "Update");
+
+        private static void Postfix()
+        {
+            PatchHelper.Safe(() => MainMenuArt.Tick());
         }
     }
 }

@@ -391,7 +391,7 @@ namespace ApexCheatEnder.UI
             if (_root.activeSelf != shouldShow) _root.SetActive(shouldShow);
             if (!shouldShow) return;
 
-            // 节流：不到刷新时刻直接返回，不重算、不拼串、不赋值。
+            // 节流：未到刷新时刻直接返回，不重算、不拼接、不赋值。
             var now = Time.time;
             if (now < _nextRefreshTime) return;
             _nextRefreshTime = now + RefreshInterval;

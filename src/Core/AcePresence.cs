@@ -120,7 +120,7 @@ namespace ApexCheatEnder.Core
         ///
         /// 为什么改成遍历而不是挂在 <c>PlayerControl.Update</c> 上：
         /// 那版游戏根本没有这个方法，补丁挂载时直接报「未找到目标方法」被跳过，
-        /// 于是标记功能在真实环境里从来没生效过（好友现场日志里就是这么写的）。
+        /// 导致标记功能在真实环境中从未生效。
         /// 改由本插件已有的帧驱动调用，不再依赖游戏存在某个特定 Update。
         /// </summary>
         public static void RefreshNameTags()
@@ -163,10 +163,15 @@ namespace ApexCheatEnder.Core
             var local = GameBridge.GetLocalPlayer();
             if (local != null && GameBridge.GetPlayerId(local) == id) return;
 
+            // 风险等级：命中了规则就要在头上标出来。
+            var risk = RiskOf(id);
+
             // 没装模组的玩家：开关打开时也要打标（默认「原本玩家」）。
+            // 但**被判定过的玩家无论如何都要标** —— 那是当场唯一能看见的告警。
             var cfgNow = AntiCheatRuntime.Config;
             var isVanilla = !isAce && !isAmethyst;
-            if (isVanilla && !(cfgNow?.MarkVanillaPlayers.Value ?? true)) return;
+            if (isVanilla && risk == RiskLevel.Normal &&
+                !(cfgNow?.MarkVanillaPlayers.Value ?? true)) return;
 
             try
             {
@@ -178,13 +183,21 @@ namespace ApexCheatEnder.Core
                 var nameText = cosmetics.nameText;
                 if (nameText == null) return;
 
-                var want = GameBridge.GetPlayerName(player) + BuildTags(isAce, isAmethyst, id);
+                var want = GameBridge.GetPlayerName(player) + BuildTags(isAce, isAmethyst, id, risk);
 
-                // Amethyst 用户整段名字上粉色，和它自己的客户端观感一致。
-                // 用富文本包一层而不是改 TextMeshPro.color：名字颜色由游戏每帧写，
-                // 改 Graphic 的颜色会被立刻覆盖并闪烁。
-                if (isAmethyst)
-                    want = "<color=#" + PresenceTags.AmethystNameHex + ">" + want + "</color>";
+                // 名字上色。用富文本包一层而不是改 TextMeshPro.color：
+                // 名字颜色由游戏每帧写，改 Graphic 的颜色会被立刻覆盖并闪烁。
+                //
+                // 优先级：作弊判定 > Amethyst 粉色。
+                // 一个人既是 Amethyst 用户又被判定过，显然该先看到「他作弊」。
+                var nameHex =
+                    risk == RiskLevel.HighRisk || risk == RiskLevel.Confirmed ? PresenceTags.HighRiskNameHex
+                    : risk == RiskLevel.Suspicious ? PresenceTags.SuspiciousNameHex
+                    : isAmethyst ? PresenceTags.AmethystNameHex
+                    : null;
+
+                if (nameHex != null)
+                    want = "<color=#" + nameHex + ">" + want + "</color>";
 
                 if (nameText.text != want) nameText.text = want;
             }
@@ -208,10 +221,32 @@ namespace ApexCheatEnder.Core
         ///   · 只知道 callId 不知道名字 → 显示「未知模组 #编号」，提示该往库里补
         ///   · 什么都没识别到 → 显示「原本玩家」（可在配置里关掉）
         /// </summary>
-        private static string BuildTags(bool isAce, bool isAmethyst, int playerId)
+        /// <summary>
+        /// 取玩家的风险等级。拿不到判定就返回正常。
+        /// </summary>
+        private static RiskLevel RiskOf(int playerId)
+        {
+            try
+            {
+                var engine = AntiCheatRuntime.Verdicts;
+                if (engine != null && engine.TryGet(playerId, out var verdict) && verdict != null)
+                    return verdict.EvaluateLevel();
+            }
+            catch { }
+            return RiskLevel.Normal;
+        }
+
+        private static string BuildTags(bool isAce, bool isAmethyst, int playerId, RiskLevel risk)
         {
             var cfg = AntiCheatRuntime.Config;
-            var parts = new List<string>(4);
+            var parts = new List<string>(5);
+
+            // 风险标记放最前面 —— 这是最需要一眼看到的信息，
+            // 模组名只是「他装了什么」，风险等级才是「要不要防着他」。
+            if (risk == RiskLevel.HighRisk || risk == RiskLevel.Confirmed)
+                parts.Add(PresenceTags.HighRiskMark);
+            else if (risk == RiskLevel.Suspicious)
+                parts.Add(PresenceTags.SuspiciousMark);
 
             var detected = ModFingerprint.Of(playerId);
             foreach (var mod in detected)
@@ -229,7 +264,7 @@ namespace ApexCheatEnder.Core
                     : "[" + mod.Display + "·" + version + "]");
             }
 
-            if (parts.Count == 0 && (cfg?.MarkVanillaPlayers.Value ?? true))
+            if (parts.Count == 0 && risk == RiskLevel.Normal && (cfg?.MarkVanillaPlayers.Value ?? true))
             {
                 var tag = cfg?.VanillaPlayerTag.Value;
                 parts.Add(string.IsNullOrEmpty(tag) ? PresenceTags.VanillaDefault : tag);
@@ -260,7 +295,7 @@ namespace ApexCheatEnder.Core
             }
             catch (Exception ex)
             {
-                // 只记一次：这条路径每 8 秒会走一遍，反复记会把日志刷爆
+                // 仅记录一次：该路径每 8 秒执行一次，重复记录会填满日志
                 if (!_sendFailureLogged)
                 {
                     _sendFailureLogged = true;
